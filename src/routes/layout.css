@@ -1,0 +1,122 @@
+@import 'tailwindcss';
+
+:root {
+	color-scheme: dark;
+}
+
+html,
+body {
+	height: 100%;
+}
+
+body {
+	margin: 0;
+	background: #0d1119;
+	color: #e5e7eb;
+	font-family:
+		Inter,
+		ui-sans-serif,
+		system-ui,
+		-apple-system,
+		'Segoe UI',
+		sans-serif;
+	-webkit-font-smoothing: antialiased;
+	overflow: hidden;
+}
+
+.material-symbols-rounded {
+	font-variation-settings:
+		'FILL' 0,
+		'wght' 400,
+		'GRAD' 0,
+		'opsz' 24;
+	vertical-align: middle;
+	user-select: none;
+}
+
+/* slim dark scrollbars */
+.scrollbar::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+.scrollbar::-webkit-scrollbar-track {
+	background: transparent;
+}
+.scrollbar::-webkit-scrollbar-thumb {
+	background: #374151;
+	border-radius: 8px;
+}
+.scrollbar::-webkit-scrollbar-thumb:hover {
+	background: #4b5563;
+}
+
+/* unrendered clip: diagonal hatch */
+.stripes-pattern {
+	background-image: repeating-linear-gradient(
+		135deg,
+		rgba(255, 255, 255, 0.05) 0px,
+		rgba(255, 255, 255, 0.05) 5px,
+		transparent 5px,
+		transparent 11px
+	);
+}
+
+/* timeline grid lines */
+.gridline {
+	background-image: repeating-linear-gradient(
+		90deg,
+		rgba(255, 255, 255, 0.05) 0,
+		rgba(255, 255, 255, 0.05) 1px,
+		transparent 1px,
+		transparent 70px
+	);
+}
+
+input[type='range'] {
+	accent-color: #8b5cf6;
+}
+
+input[type='color'] {
+	-webkit-appearance: none;
+	border: none;
+	background: none;
+}
+input[type='color']::-webkit-color-swatch-wrapper {
+	padding: 0;
+}
+input[type='color']::-webkit-color-swatch {
+	border: 1px solid rgba(255, 255, 255, 0.15);
+	border-radius: 6px;
+}
+
+/* clip drag points (Magix-style): top corners = fade, bottom = trim/cut */
+.handle-fade {
+	position: absolute;
+	width: 11px;
+	height: 11px;
+	border-radius: 9999px;
+	background: #0e131b;
+	border: 2px solid #22d3ee;
+	cursor: ew-resize;
+	z-index: 6;
+	transition: transform 0.1s;
+}
+.handle-fade:hover {
+	transform: scale(1.25);
+}
+
+.handle-trim {
+	position: absolute;
+	width: 12px;
+	height: 7px;
+	bottom: -1px;
+	background: #f59e0b;
+	border-radius: 3px 3px 0 0;
+	cursor: ew-resize;
+	z-index: 6;
+	box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+	transition: transform 0.1s;
+}
+.handle-trim:hover {
+	transform: scaleX(1.3);
+}

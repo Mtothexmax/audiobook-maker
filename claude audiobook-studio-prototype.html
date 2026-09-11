@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Weft — Audiobook Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,300..600,0..1,-25..200" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          canvas: '#12141a',
+          panel: '#1a1d25',
+          'panel-raised': '#20242e',
+          line: '#2a2e38',
+          hi: '#eeece4',
+          mid: '#a3a6b3',
+          low: '#6b6e7a',
+          gold: '#d9a15b',
+          'gold-light': '#e6b97d',
+          teal: '#5fb3a3',
+          red: '#c9634f',
+        },
+        fontFamily: {
+          display: ['Fraunces', 'serif'],
+          sans: ['Inter', 'ui-sans-serif', 'sans-serif'],
+          mono: ['IBM Plex Mono', 'ui-monospace', 'monospace'],
+        },
+      },
+    },
+  };
+</script>
+<style>
+  * { box-sizing: border-box; }
+  html, body { background: #12141a; }
+  body { margin: 0; }
+
+  .material-symbols-rounded {
+    font-family: 'Material Symbols Rounded';
+    font-weight: normal;
+    font-style: normal;
+    display: inline-block;
+    line-height: 1;
+    text-transform: none;
+    letter-spacing: normal;
+    word-wrap: normal;
+    white-space: nowrap;
+    direction: ltr;
+    -webkit-font-smoothing: antialiased;
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 22;
+    vertical-align: middle;
+  }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: #12141a; }
+  ::-webkit-scrollbar-thumb { background: #2a2e38; border-radius: 6px; border: 2px solid #12141a; }
+  ::-webkit-scrollbar-thumb:hover { background: #363b48; }
+
+  input[type=number]::-webkit-inner-spin-button { opacity: 0.5; }
+
+  .btn-primary {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #d9a15b; color: #12141a; font-weight: 600; font-size: 12.5px;
+    padding: 7px 14px; border-radius: 8px; transition: background .15s, transform .1s;
+    white-space: nowrap;
+  }
+  .btn-primary:hover { background: #e6b97d; }
+  .btn-primary:disabled { opacity: .55; cursor: default; }
+  .btn-primary:active:not(:disabled) { transform: scale(.98); }
+
+  .btn-secondary {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #20242e; color: #eeece4; font-size: 12.5px; font-weight: 500;
+    padding: 7px 12px; border-radius: 8px; border: 1px solid #2a2e38; white-space: nowrap;
+  }
+  .btn-secondary:hover { background: #262b36; }
+
+  .btn-danger {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: rgba(201,99,79,0.12); color: #e08a76; font-size: 12.5px; font-weight: 600;
+    padding: 7px 12px; border-radius: 8px; border: 1px solid rgba(201,99,79,0.35);
+  }
+  .btn-danger:hover { background: rgba(201,99,79,0.22); }
+
+  .icon-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 32px; height: 32px; border-radius: 8px; color: #a3a6b3; flex-shrink: 0;
+  }
+  .icon-btn:hover { background: #20242e; color: #eeece4; }
+
+  .icon-btn-sm {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 24px; height: 24px; border-radius: 6px;
+  }
+  .icon-btn-sm:hover { background: #262b36; }
+
+  .menu-item {
+    display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+    padding: 9px 12px; font-size: 12.5px; color: #eeece4;
+  }
+  .menu-item:hover { background: #262b36; }
+
+  .field-label {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em;
+    color: #6b6e7a; font-weight: 600;
+  }
+
+  .input-field, .select-field, textarea.mono-field {
+    width: 100%; background: #12141a; border: 1px solid #2a2e38; border-radius: 8px;
+    padding: 7px 10px; font-size: 12.5px; color: #eeece4;
+  }
+  .input-field:focus, .select-field:focus, textarea.mono-field:focus { outline: none; border-color: #d9a15b; }
+  textarea.mono-field { font-family: 'IBM Plex Mono', monospace; line-height: 1.6; resize: vertical; }
+
+  .tag-chip {
+    display: inline-flex; align-items: center; gap: 3px;
+    background: rgba(217,161,91,0.18); color: #e6b97d;
+    border: 1px solid rgba(217,161,91,0.4); border-radius: 999px;
+    padding: 1px 7px 1px 5px; margin: 0 1px; font-size: 11px; white-space: nowrap;
+    font-family: 'Inter', sans-serif;
+  }
+
+  .stripes-pattern {
+    background-image: repeating-linear-gradient(135deg, rgba(255,255,255,0.045) 0px, rgba(255,255,255,0.045) 5px, transparent 5px, transparent 11px);
+  }
+
+  .handle-fade {
+    position: absolute; width: 11px; height: 11px; border-radius: 50%;
+    background: #12141a; border: 2px solid #d9a15b; cursor: ew-resize; z-index: 6;
+    transition: transform .1s;
+  }
+  .handle-fade:hover { transform: scale(1.25); }
+
+  .handle-trim {
+    position: absolute; width: 12px; height: 7px; bottom: -1px;
+    background: #5fb3a3; border-radius: 3px; cursor: ew-resize; z-index: 6;
+    box-shadow: 0 0 0 1px rgba(0,0,0,0.4);
+    transition: transform .1s;
+  }
+  .handle-trim:hover { transform: scaleX(1.3); }
+
+  .slide-enter-active, .slide-leave-active { transition: transform .18s ease, opacity .18s ease; }
+  .slide-enter-from, .slide-leave-to { transform: translateX(24px); opacity: 0; }
+
+  .fade-modal-enter-active, .fade-modal-leave-active { transition: opacity .15s ease; }
+  .fade-modal-enter-from, .fade-modal-leave-to { opacity: 0; }
+
+  .char-swatch { width: 22px; height: 22px; border-radius: 999px; cursor: pointer; border: 2px solid transparent; }
+  .char-swatch.active { border-color: #eeece4; }
+</style>
+</head>
+<body>
+<div id="app" class="h-screen w-screen flex flex-col bg-canvas text-hi font-sans overflow-hidden text-[13px]" @click="closeAllPopovers">
+
+  <!-- ============ TOP TOOLBAR ============ -->
+  <header class="flex items-center gap-3 px-4 h-14 border-b border-line bg-panel shrink-0">
+    <div class="flex items-center gap-2 pr-2">
+      <span class="material-symbols-rounded text-gold text-[22px]">auto_stories</span>
+      <div class="leading-tight">
+        <h1 class="font-display text-[16px] font-semibold tracking-wide">Weft</h1>
+      </div>
+      <input v-model="projectName" class="ml-2 bg-transparent text-mid text-xs border-b border-transparent hover:border-line focus:border-gold outline-none px-1 py-0.5 w-40" />
+    </div>
+
+    <div class="flex-1"></div>
+
+    <button @click="togglePlay" class="icon-btn" :title="isPlaying ? 'Pause' : 'Play'">
+      <span class="material-symbols-rounded text-[20px]">{{ isPlaying ? 'pause' : 'play_arrow' }}</span>
+    </button>
+    <button @click="playhead = 0" class="icon-btn" title="Return to start">
+      <span class="material-symbols-rounded text-[18px]">first_page</span>
+    </button>
+    <span class="font-mono text-[11px] text-mid w-24 text-center tabular-nums">{{ fmtTime(playhead) }} / {{ fmtTime(totalDuration) }}</span>
+
+    <div class="w-px h-6 bg-line mx-1"></div>
+
+    <button @click="zoomOut" class="icon-btn" title="Zoom out"><span class="material-symbols-rounded text-[18px]">zoom_out</span></button>
+    <input type="range" min="20" max="240" step="10" v-model.number="zoom" class="w-24 accent-gold" title="Timeline zoom" />
+    <button @click="zoomIn" class="icon-btn" title="Zoom in"><span class="material-symbols-rounded text-[18px]">zoom_in</span></button>
+
+    <div class="w-px h-6 bg-line mx-1"></div>
+
+    <div class="relative">
+      <button @click.stop="showAddTrackMenu = !showAddTrackMenu" class="btn-secondary">
+        <span class="material-symbols-rounded text-[16px]">add</span> Add track
+      </button>
+      <div v-if="showAddTrackMenu" @click.stop class="absolute right-0 top-full mt-1.5 w-56 bg-panel-raised border border-line rounded-lg shadow-2xl overflow-hidden z-40">
+        <button @click="addTrack('dialogue')" class="menu-item"><span class="material-symbols-rounded text-[17px] text-gold">record_voice_over</span>Dialogue track</button>
+        <button @click="addTrack('sfx')" class="menu-item"><span class="material-symbols-rounded text-[17px] text-teal">graphic_eq</span>Sound track</button>
+      </div>
+    </div>
+
+    <button @click.stop="showJson = true" class="btn-primary">
+      <span class="material-symbols-rounded text-[16px]">data_object</span> Export JSON
+    </button>
+  </header>
+
+  <!-- ============ BODY ============ -->
+  <div class="flex-1 flex min-h-0">
+
+    <!-- ============ CHARACTERS SIDEBAR ============ -->
+    <aside class="w-72 shrink-0 border-r border-line bg-panel flex flex-col min-h-0">
+      <div class="flex items-center justify-between px-4 pt-4 pb-2">
+        <h2 class="font-display text-[14px] font-semibold text-hi">Characters</h2>
+        <button @click.stop="showAddCharacter = !showAddCharacter" class="icon-btn-sm text-gold hover:bg-gold/10" title="Add character">
+          <span class="material-symbols-rounded text-[19px]">person_add</span>
+        </button>
+      </div>
+
+      <div v-if="showAddCharacter" class="mx-3 mb-2 p-3 rounded-lg border border-line bg-panel-raised space-y-2.5">
+        <div>
+          <span class="field-label">Name</span>
+          <input v-model="newChar.name" placeholder="e.g. Old Fisherman" class="input-field mt-1" @keydown.enter="addCharacter" />
+        </div>
+        <div>
+          <span class="field-label">Fish Audio voice ID</span>
+          <input v-model="newChar.voiceId" placeholder="fa-voice-…" class="input-field mt-1 font-mono" />
+        </div>
+        <div>
+          <span class="field-label">Default emotion</span>
+          <select v-model="newChar.emotion" class="select-field mt-1">
+            <option v-for="e in emotions" :key="e" :value="e">{{ e }}</option>
+            <option value="neutral">neutral</option>
+          </select>
+        </div>
+        <div>
+          <span class="field-label">Color</span>
+          <div class="flex gap-1.5 mt-1.5 flex-wrap">
+            <button v-for="c in palette" :key="c" class="char-swatch" :class="{active: newChar.color===c}" :style="{background:c}" @click="newChar.color=c"></button>
+          </div>
+        </div>
+        <div class="flex gap-2 pt-1">
+          <button @click="addCharacter" class="btn-primary flex-1 justify-center">Add character</button>
+          <button @click="showAddCharacter=false" class="btn-secondary">Cancel</button>
+        </div>
+      </div>
+
+      <div class="flex-1 overflow-y-auto px-2 pb-3 space-y-0.5">
+        <div v-for="c in characters" :key="c.id" class="group flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-panel-raised border border-transparent hover:border-line transition-colors">
+          <div class="w-9 h-9 rounded-full flex items-center justify-center font-display text-[12px] font-semibold shrink-0"
+               :style="{background:c.color+'26', color:c.color, border:'1px solid '+c.color+'70'}">{{ initials(c.name) }}</div>
+          <div class="min-w-0 flex-1">
+            <div class="text-[12.5px] font-medium truncate">{{ c.name }}</div>
+            <div class="text-[10.5px] text-low font-mono truncate">{{ c.voiceId || 'no voice id set' }}</div>
+          </div>
+          <button @click="removeCharacter(c.id)" class="opacity-0 group-hover:opacity-100 icon-btn-sm text-low hover:text-red transition-opacity shrink-0" title="Remove character">
+            <span class="material-symbols-rounded text-[16px]">delete</span>
+          </button>
+        </div>
+        <div v-if="characters.length===0" class="text-center text-low text-[11.5px] py-8 px-4">No characters yet. Add one to start casting your dialogue.</div>
+      </div>
+
+      <div class="px-4 py-3 border-t border-line text-[10.5px] text-low leading-relaxed">
+        Each character maps to a <span class="text-mid">Fish Audio</span> voice. Assign it to any clip in the timeline.
+      </div>
+    </aside>
+
+    <!-- ============ TIMELINE ============ -->
+    <main class="flex-1 flex flex-col min-h-0">
+      <div class="flex-1 overflow-auto" ref="scrollEl">
+        <div class="relative" :style="{ width: (160 + totalDuration*zoom) + 'px' }">
+
+          <!-- ruler -->
+          <div class="flex w-full sticky top-0 z-30">
+            <div class="w-40 shrink-0 sticky left-0 z-40 bg-panel border-r border-b border-line flex items-center px-3">
+              <span class="text-[10px] uppercase tracking-wider text-low font-semibold">Timeline</span>
+            </div>
+            <div class="relative flex-1 bg-panel border-b border-line h-7 cursor-text" @click="seek">
+              <div v-for="t in rulerTicks" :key="t" class="absolute top-0 bottom-0" :style="{left: (t*zoom)+'px'}">
+                <span class="absolute top-1 left-1 text-[9px] font-mono text-low select-none">{{ fmtTime(t) }}</span>
+                <div class="absolute bottom-0 w-px h-2 bg-line"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- tracks -->
+          <div v-for="track in tracks" :key="track.id" class="flex w-full" :style="{height: (track.type==='sfx' ? '80px' : '112px')}">
+
+            <!-- track header -->
+            <div class="relative w-40 shrink-0 sticky left-0 z-10 bg-panel border-r border-b border-line px-3 py-2 flex flex-col justify-center gap-1">
+              <button @click="removeTrack(track)" class="absolute top-1 right-1 icon-btn-sm text-low hover:text-red" title="Remove track">
+                <span class="material-symbols-rounded text-[14px]">close</span>
+              </button>
+              <input v-model="track.name" class="bg-transparent text-[12px] font-semibold outline-none w-full truncate pr-4" />
+              <div class="flex items-center gap-1">
+                <span class="material-symbols-rounded text-[13px]" :class="track.type==='sfx' ? 'text-teal' : 'text-gold'">{{ track.type==='sfx' ? 'graphic_eq' : 'record_voice_over' }}</span>
+                <span class="text-[10px] text-low">{{ track.clips.length }} clip{{ track.clips.length===1?'':'s' }}</span>
+              </div>
+
+              <button v-if="track.type==='dialogue'" @click="addDialogueClip(track)" class="mt-0.5 text-[11px] flex items-center gap-1 text-gold hover:text-gold-light w-fit">
+                <span class="material-symbols-rounded text-[14px]">add_comment</span>Add line
+              </button>
+
+              <div v-else class="relative w-fit">
+                <button @click.stop="soundPickerTrackId = soundPickerTrackId===track.id ? null : track.id" class="mt-0.5 text-[11px] flex items-center gap-1 text-teal hover:brightness-125 w-fit">
+                  <span class="material-symbols-rounded text-[14px]">add</span>Add sound
+                </button>
+                <div v-if="soundPickerTrackId===track.id" @click.stop class="absolute left-0 top-full mt-1 w-52 bg-panel-raised border border-line rounded-lg shadow-2xl overflow-hidden z-40">
+                  <button v-for="p in soundPresets" :key="p.name" @click="addSoundFromPreset(track,p)" class="menu-item">
+                    <span class="material-symbols-rounded text-[16px] text-teal">{{ p.icon }}</span>{{ p.name }}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- lane -->
+            <div class="relative flex-1 border-b border-line" :style="{backgroundImage: gridBg}" @mousedown="onLaneMouseDown">
+
+              <div v-for="clip in track.clips" :key="clip.id"
+                   class="absolute top-2 bottom-2 rounded-md overflow-hidden cursor-grab active:cursor-grabbing select-none"
+                   :class="activeClipId===clip.id ? 'ring-2 ring-gold ring-offset-0' : ''"
+                   :style="clipStyle(clip)"
+                   @mousedown.stop="onHandleDown($event, clip, 'move')"
+                   @click.stop="activeClipId = clip.id"
+                   @dblclick.stop="openEditor(clip)">
+
+                <div v-if="clip.type==='dialogue' && !clip.rendered" class="absolute inset-0 stripes-pattern pointer-events-none"></div>
+
+                <div class="relative h-full flex flex-col px-2 py-1 pointer-events-none">
+                  <div class="flex items-center gap-1.5 min-w-0">
+                    <template v-if="clip.type==='dialogue'">
+                      <span class="w-4 h-4 rounded-full shrink-0 flex items-center justify-center text-[7.5px] font-bold"
+                            :style="{background:charColor(clip.characterId), color:'#12141a'}">{{ initials(charName(clip.characterId)) }}</span>
+                      <span class="text-[11px] font-medium truncate" :style="{color:charColor(clip.characterId)}">{{ charName(clip.characterId) }}</span>
+                    </template>
+                    <template v-else>
+                      <span class="material-symbols-rounded text-[14px] text-teal shrink-0">{{ clip.icon }}</span>
+                      <span class="text-[11px] font-medium truncate text-teal">{{ clip.name }}</span>
+                    </template>
+                    <span v-if="clip.type==='dialogue' && countTags(clip.text)>0" class="ml-auto flex items-center gap-0.5 text-[9px] text-gold bg-gold/15 rounded-full px-1.5 py-[1px] shrink-0">
+                      <span class="material-symbols-rounded text-[10px]">sell</span>{{ countTags(clip.text) }}
+                    </span>
+                  </div>
+
+                  <div class="flex-1 flex items-center min-h-0 my-0.5">
+                    <div v-if="clip.type==='sfx' || clip.rendered" class="flex items-end gap-[2px] h-full w-full">
+                      <div v-for="(v,i) in sampleWaveform(clip, waveformBarCount(clip))" :key="i" class="flex-1 rounded-sm"
+                           :style="{height:(v*100)+'%', background: clip.type==='sfx' ? 'rgba(95,179,163,0.75)' : 'rgba(233,230,222,0.55)'}"></div>
+                    </div>
+                    <div v-else class="text-[10px] text-low italic flex items-center gap-1 whitespace-nowrap">
+                      <span class="material-symbols-rounded text-[13px]">hourglass_empty</span>~{{ estimateDuration(clip.text).toFixed(1) }}s · not rendered
+                    </div>
+                  </div>
+
+                  <div v-if="clip.type==='dialogue'" class="text-[10px] text-mid/80 truncate leading-tight" v-html="renderTagged(clip.text,70)"></div>
+                </div>
+
+                <div v-if="clip.fadeIn>0" class="absolute left-0 top-0 bottom-0 bg-canvas/70 pointer-events-none"
+                     :style="{width: (clip.fadeIn*zoom)+'px', clipPath:'polygon(0 0,0 100%,100% 0)'}"></div>
+                <div v-if="clip.fadeOut>0" class="absolute right-0 top-0 bottom-0 bg-canvas/70 pointer-events-none"
+                     :style="{width: (clip.fadeOut*zoom)+'px', clipPath:'polygon(100% 0,100% 100%,0 0)'}"></div>
+
+                <div v-if="clip.rendering" class="absolute inset-0 bg-canvas/60 flex items-center justify-center pointer-events-none z-10">
+                  <span class="material-symbols-rounded text-gold text-[20px] animate-spin">progress_activity</span>
+                </div>
+
+                <template v-if="(clip.type==='sfx' || clip.rendered) && !clip.rendering">
+                  <div class="handle-fade" style="left:-5px; top:-5px;" @mousedown.stop="onHandleDown($event, clip, 'fade-in')" title="Drag to fade in"></div>
+                  <div class="handle-fade" style="right:-5px; top:-5px;" @mousedown.stop="onHandleDown($event, clip, 'fade-out')" title="Drag to fade out"></div>
+                  <div class="handle-trim" style="left:0;" @mousedown.stop="onHandleDown($event, clip, 'trim-left')" title="Drag to trim start"></div>
+                  <div class="handle-trim" style="right:0;" @mousedown.stop="onHandleDown($event, clip, 'trim-right')" title="Drag to trim end"></div>
+                </template>
+              </div>
+            </div>
+          </div>
+
+          <div class="absolute w-0.5 bg-gold pointer-events-none z-20" style="top:28px; bottom:0;" :style="{left:(160+playhead*zoom)+'px', top:'28px', bottom:0}">
+            <div class="w-2.5 h-2.5 rounded-full bg-gold -ml-[4px] -mt-[3px]"></div>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="h-8 shrink-0 border-t border-line bg-panel flex items-center px-4 gap-4 text-[10.5px] text-low">
+        <span class="flex items-center gap-1"><span class="material-symbols-rounded text-[13px] text-teal">drag_handle</span>Drag bottom handles to trim</span>
+        <span class="flex items-center gap-1"><span class="material-symbols-rounded text-[13px] text-gold">radio_button_unchecked</span>Drag top handles to fade</span>
+        <span class="flex items-center gap-1"><span class="material-symbols-rounded text-[13px]">touch_app</span>Double-click a clip to edit</span>
+      </div>
+    </main>
+
+    <!-- ============ EDIT DRAWER ============ -->
+    <transition name="slide">
+      <aside v-if="drawerOpen" class="w-[380px] shrink-0 border-l border-line bg-panel flex flex-col min-h-0">
+        <div class="flex items-center justify-between px-4 h-14 border-b border-line shrink-0">
+          <h2 class="font-display text-[14px] font-semibold flex items-center gap-2">
+            <span class="material-symbols-rounded text-[18px]" :class="editingClip.type==='sfx' ? 'text-teal' : 'text-gold'">
+              {{ editingClip.type==='sfx' ? 'graphic_eq' : 'record_voice_over' }}
+            </span>
+            {{ editingClip.type==='sfx' ? 'Edit sound' : 'Edit clip' }}
+          </h2>
+          <button @click="editingClipId=null" class="icon-btn-sm text-low hover:text-hi"><span class="material-symbols-rounded text-[18px]">close</span></button>
+        </div>
+
+        <div class="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+
+          <!-- dialogue-only: character -->
+          <div v-if="editingClip.type==='dialogue'">
+            <span class="field-label">Character</span>
+            <select v-model="editingClip.characterId" class="select-field mt-1 font-medium" :style="{color:charColor(editingClip.characterId)}">
+              <option v-for="c in characters" :key="c.id" :value="c.id">{{ c.name }}</option>
+            </select>
+          </div>
+
+          <!-- sfx-only: name + duration -->
+          <div v-else class="grid grid-cols-2 gap-3">
+            <div class="col-span-2">
+              <span class="field-label">Sound name</span>
+              <input v-model="editingClip.name" class="input-field mt-1" />
+            </div>
+            <div>
+              <span class="field-label">Duration (s)</span>
+              <input type="number" min="0.2" step="0.1" v-model.number="editingClip.duration" class="input-field mt-1" />
+            </div>
+          </div>
+
+          <!-- render status -->
+          <div class="flex items-center justify-between gap-3 p-2.5 rounded-lg border border-line bg-panel-raised">
+            <div class="text-[11px] leading-snug">
+              <span v-if="editingClip.type==='sfx'" class="text-mid">Library clip · {{ fmtSeconds(editingClip.duration) }}</span>
+              <span v-else-if="editingClip.rendered" class="text-mid">Rendered · {{ fmtSeconds(editingClip.duration) }} of audio</span>
+              <span v-else class="text-low">Not rendered · ~{{ estimateDuration(editingClip.text).toFixed(1) }}s estimated</span>
+            </div>
+            <button v-if="editingClip.type==='dialogue'" @click="regenerateClip(editingClip)" :disabled="editingClip.rendering" class="btn-primary shrink-0">
+              <span class="material-symbols-rounded text-[15px]" :class="editingClip.rendering ? 'animate-spin' : ''">{{ editingClip.rendering ? 'progress_activity' : 'autorenew' }}</span>
+              {{ editingClip.rendering ? 'Rendering…' : (editingClip.rendered ? 'Regenerate' : 'Render audio') }}
+            </button>
+          </div>
+
+          <!-- dialogue text editor -->
+          <div v-if="editingClip.type==='dialogue'">
+            <div class="rounded-lg border border-gold/30 bg-gold/10 px-3 py-2 text-[11px] leading-relaxed text-gold-light flex gap-2 mb-3">
+              <span class="material-symbols-rounded text-[16px] shrink-0">tips_and_updates</span>
+              <span>Bracketed directives like <code class="font-mono">[pause:0.6]</code> and <code class="font-mono">[emotion:whisper]</code> are sent straight to the <b>Fish Audio</b> engine to shape pacing and delivery.</span>
+            </div>
+
+            <span class="field-label">Script</span>
+            <textarea ref="textArea" v-model="editingClip.text" rows="5" class="input-field mono-field mt-1"></textarea>
+
+            <div class="flex flex-wrap gap-1.5 mt-2">
+              <button @click="insertTag('[pause:0.5]')" class="btn-secondary !py-1 !px-2 !text-[11px]">
+                <span class="material-symbols-rounded text-[13px]">pause_circle</span>Pause
+              </button>
+              <button v-for="e in emotions" :key="e" @click="insertTag('[emotion:'+e+']')" class="btn-secondary !py-1 !px-2 !text-[11px]">
+                <span class="material-symbols-rounded text-[13px]">theater_comedy</span>{{ e }}
+              </button>
+              <button @click="insertTag('[emphasis]')" class="btn-secondary !py-1 !px-2 !text-[11px]">
+                <span class="material-symbols-rounded text-[13px]">priority_high</span>emphasis
+              </button>
+            </div>
+
+            <span class="field-label block mt-3">Preview</span>
+            <div class="mt-1 p-2.5 rounded-lg border border-line bg-canvas text-[12px] leading-relaxed min-h-[48px]" v-html="renderTagged(editingClip.text) || '<span class=\'text-low\'>Nothing written yet…</span>'"></div>
+          </div>
+
+          <!-- fades -->
+          <div>
+            <span class="field-label">Fades</span>
+            <div class="grid grid-cols-2 gap-3 mt-1">
+              <label class="block">
+                <span class="text-[10.5px] text-low">Fade in (s)</span>
+                <input type="number" min="0" step="0.1" v-model.number="editingClip.fadeIn" class="input-field mt-1" />
+              </label>
+              <label class="block">
+                <span class="text-[10.5px] text-low">Fade out (s)</span>
+                <input type="number" min="0" step="0.1" v-model.number="editingClip.fadeOut" class="input-field mt-1" />
+              </label>
+            </div>
+            <p class="text-[10.5px] text-low mt-1.5">Tip: drag the gold circles on the clip's top corners to set fades visually, and the teal tabs on the bottom corners to trim its length.</p>
+          </div>
+        </div>
+
+        <div class="border-t border-line px-4 py-3 flex gap-2 shrink-0">
+          <button @click="duplicateClipFromDrawer" class="btn-secondary flex-1 justify-center"><span class="material-symbols-rounded text-[16px]">content_copy</span>Duplicate</button>
+          <button @click="deleteClipFromDrawer" class="btn-danger flex-1 justify-center"><span class="material-symbols-rounded text-[16px]">delete</span>Delete</button>
+        </div>
+      </aside>
+    </transition>
+  </div>
+
+  <!-- ============ EXPORT JSON MODAL ============ -->
+  <transition name="fade-modal">
+    <div v-if="showJson" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-8" @click.self="showJson=false">
+      <div class="bg-panel border border-line rounded-xl w-full max-w-2xl max-h-[82vh] flex flex-col shadow-2xl">
+        <div class="flex items-center justify-between px-5 h-14 border-b border-line shrink-0">
+          <h2 class="font-display text-[15px] font-semibold flex items-center gap-2">
+            <span class="material-symbols-rounded text-gold text-[19px]">data_object</span>Export project
+          </h2>
+          <button @click="showJson=false" class="icon-btn-sm text-low hover:text-hi"><span class="material-symbols-rounded text-[18px]">close</span></button>
+        </div>
+        <p class="px-5 pt-3 text-[11.5px] text-mid">A flat, human-readable format — characters, tracks, and clips with timing, fades, and Fish Audio directives inline.</p>
+        <pre class="flex-1 overflow-auto mx-5 my-3 p-3 rounded-lg bg-canvas border border-line text-[11px] font-mono text-mid leading-relaxed">{{ exportedJson }}</pre>
+        <div class="border-t border-line px-5 py-3 flex gap-2 justify-end shrink-0">
+          <button @click="copyJson" class="btn-secondary"><span class="material-symbols-rounded text-[16px]">{{ copied ? 'check' : 'content_copy' }}</span>{{ copied ? 'Copied' : 'Copy JSON' }}</button>
+          <button @click="downloadJson" class="btn-primary"><span class="material-symbols-rounded text-[16px]">download</span>Download .json</button>
+        </div>
+      </div>
+    </div>
+  </transition>
+
+</div>
+
+<script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+<script>
+const { createApp } = Vue;
+
+const PALETTE = ['#d9a15b','#6fa3c7','#b48ead','#7fb069','#d98ea3','#5fb3a3','#c98a4b','#8f9fd9'];
+
+function hashStr(s){ let h=1779033703; for(let i=0;i<s.length;i++){ h=Math.imul(h^s.charCodeAt(i),3432918353); h=(h<<13)|(h>>>19); } return h>>>0; }
+function mulberry32(a){ return function(){ a|=0; a=(a+0x6D2B79F5)|0; let t=Math.imul(a^(a>>>15),1|a); t=(t+Math.imul(t^(t>>>7),61|t))^t; return ((t^(t>>>14))>>>0)/4294967296; }; }
+function genWaveform(seed, n=64){
+  const rnd = mulberry32(hashStr(String(seed)));
+  const arr = []; let v = 0.4 + rnd()*0.2;
+  for(let i=0;i<n;i++){ v += (rnd()-0.5)*0.5; v = Math.max(0.08, Math.min(1, v)); arr.push(+v.toFixed(3)); }
+  return arr;
+}
+function round2(n){ return n==null ? n : Math.round(n*100)/100; }
+
+createApp({
+  data(){
+    return {
+      idCounter: 100,
+      projectName: 'The Lighthouse Keeper',
+      palette: PALETTE,
+      emotions: ['happy','sad','angry','calm','whisper','excited','fearful','surprised','sarcastic','tender'],
+      soundPresets: [
+        {name:'Rain Ambience', icon:'rainy', duration:6},
+        {name:'Wind Gust', icon:'air', duration:3},
+        {name:'Door Creak', icon:'sensor_door', duration:1.4},
+        {name:'Footsteps', icon:'directions_walk', duration:2.2},
+        {name:'Thunder Clap', icon:'thunderstorm', duration:1.2},
+        {name:'Music Bed', icon:'music_note', duration:10},
+        {name:'Birdsong', icon:'park', duration:4},
+        {name:'Crowd Murmur', icon:'groups', duration:5},
+      ],
+      characters: [
+        {id:'char-1', name:'Narrator', color: PALETTE[0], voiceId:'fa-voice-narrator-01', emotion:'calm'},
+        {id:'char-2', name:'Elin Voss', color: PALETTE[1], voiceId:'fa-voice-elin-07', emotion:'neutral'},
+        {id:'char-3', name:'Cassian', color: PALETTE[4], voiceId:'fa-voice-cassian-12', emotion:'neutral'},
+      ],
+      tracks: [
+        {
+          id:'track-1', type:'dialogue', name:'Narration & Dialogue',
+          clips: [
+            { id:'d1', type:'dialogue', characterId:'char-1', rendered:true, rendering:false, start:0, duration:11.4, fadeIn:0.3, fadeOut:0, waveform: genWaveform('d1',64),
+              text:'[emotion:calm] The lighthouse stood alone against the storm, [pause:0.6] its light sweeping the black water like a slow, patient heartbeat.' },
+            { id:'d2', type:'dialogue', characterId:'char-2', rendered:true, rendering:false, start:11.8, duration:4.4, fadeIn:0.1, fadeOut:0.2, waveform: genWaveform('d2',64),
+              text:"[emotion:whisper] Don't move. [pause:0.4] Something's out there, past the rocks." },
+            { id:'d3', type:'dialogue', characterId:'char-3', rendered:false, rendering:false, start:16.7, duration:null, fadeIn:0, fadeOut:0, waveform:[],
+              text:'[emotion:angry] I told you not to come back here! [pause:0.3] Not after what happened.' },
+            { id:'d4', type:'dialogue', characterId:'char-1', rendered:true, rendering:false, start:26.5, duration:9.6, fadeIn:0, fadeOut:0.4, waveform: genWaveform('d4',64),
+              text:'[emotion:tender] Elin reached for his hand, [pause:0.5] and for a moment, the storm seemed very far away.' },
+          ],
+        },
+        {
+          id:'track-2', type:'sfx', name:'Ambience & Effects',
+          clips: [
+            { id:'s1', type:'sfx', name:'Rain Ambience', icon:'rainy', start:0, duration:20, fadeIn:1.5, fadeOut:2.5, waveform: genWaveform('s1',80) },
+            { id:'s2', type:'sfx', name:'Door Creak', icon:'sensor_door', start:11, duration:1.4, fadeIn:0, fadeOut:0, waveform: genWaveform('s2',48) },
+            { id:'s3', type:'sfx', name:'Thunder Clap', icon:'thunderstorm', start:24.2, duration:1.3, fadeIn:0, fadeOut:0.2, waveform: genWaveform('s3',48) },
+          ],
+        },
+      ],
+
+      zoom: 70,
+      playhead: 0,
+      isPlaying: false,
+      playTimer: null,
+
+      activeClipId: null,
+      editingClipId: null,
+      drag: null,
+
+      showAddTrackMenu: false,
+      soundPickerTrackId: null,
+      showAddCharacter: false,
+      showJson: false,
+      copied: false,
+
+      newChar: { name:'', color: PALETTE[3], voiceId:'', emotion:'neutral' },
+    };
+  },
+
+  computed: {
+    totalDuration(){
+      let maxEnd = 20;
+      this.tracks.forEach(t => t.clips.forEach(c => {
+        maxEnd = Math.max(maxEnd, c.start + this.effectiveDuration(c));
+      }));
+      return maxEnd + 8;
+    },
+    rulerStep(){
+      if(this.zoom>=180) return 1;
+      if(this.zoom>=90) return 2;
+      if(this.zoom>=45) return 5;
+      if(this.zoom>=22) return 10;
+      return 30;
+    },
+    rulerTicks(){
+      const ticks = [];
+      for(let t=0; t<=this.totalDuration; t+=this.rulerStep) ticks.push(t);
+      return ticks;
+    },
+    gridBg(){
+      const step = this.rulerStep*this.zoom;
+      return `repeating-linear-gradient(to right, rgba(255,255,255,0.05) 0, rgba(255,255,255,0.05) 1px, transparent 1px, transparent ${step}px)`;
+    },
+    drawerOpen(){ return this.editingClipId != null; },
+    editingClip(){
+      for(const t of this.tracks){ const c = t.clips.find(c=>c.id===this.editingClipId); if(c) return c; }
+      return null;
+    },
+    exportedJson(){ return JSON.stringify(this.buildExport(), null, 2); },
+  },
+
+  methods: {
+    nextId(prefix){ this.idCounter++; return prefix+'-'+this.idCounter; },
+
+    initials(name){ if(!name) return '?'; return name.trim().split(/\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase(); },
+    charById(id){ return this.characters.find(c=>c.id===id) || null; },
+    charColor(id){ const c=this.charById(id); return c ? c.color : '#6b6e7a'; },
+    charName(id){ const c=this.charById(id); return c ? c.name : 'Unassigned'; },
+
+    fmtTime(s){
+      if(s==null || isNaN(s)) return '0:00';
+      const m = Math.floor(s/60); const sec = Math.floor(s%60);
+      return m+':'+String(sec).padStart(2,'0');
+    },
+    fmtSeconds(s){ return (s==null?0:s).toFixed(1)+'s'; },
+
+    estimateDuration(text){
+      text = text || '';
+      let pauseSecs = 0;
+      const matches = text.matchAll(/\[pause:?\s*([\d.]+)s?\]/gi);
+      for(const m of matches) pauseSecs += parseFloat(m[1]||0);
+      const stripped = text.replace(/\[[^\]]*\]/g,'').trim();
+      const speech = stripped.length/13;
+      return Math.max(0.6, Math.round((speech+pauseSecs)*10)/10);
+    },
+    effectiveDuration(clip){
+      if(clip.type==='sfx') return clip.duration || 0.2;
+      return clip.rendered ? (clip.duration||0.2) : this.estimateDuration(clip.text);
+    },
+    clipLeft(clip){ return clip.start*this.zoom; },
+    clipWidth(clip){ return Math.max(28, this.effectiveDuration(clip)*this.zoom); },
+    clipStyle(clip){
+      const left = this.clipLeft(clip)+'px';
+      const width = this.clipWidth(clip)+'px';
+      let background, borderColor, borderStyle='solid';
+      if(clip.type==='sfx'){
+        background = 'linear-gradient(180deg, rgba(95,179,163,0.22), rgba(95,179,163,0.08))';
+        borderColor = 'rgba(95,179,163,0.55)';
+      } else if(!clip.rendered){
+        background = '#1c1f27';
+        borderColor = '#3a3e4a';
+        borderStyle = 'dashed';
+      } else {
+        const c = this.charColor(clip.characterId);
+        background = `linear-gradient(180deg, ${c}30, ${c}12)`;
+        borderColor = c+'90';
+      }
+      return { left, width, background, borderStyle, borderWidth:'1px', borderColor };
+    },
+
+    waveformBarCount(clip){ return Math.max(6, Math.min(140, Math.floor(this.clipWidth(clip)/3))); },
+    sampleWaveform(clip, count){
+      const src = clip.waveform || [];
+      if(!src.length) return [];
+      if(count<=1) return [src[0]];
+      const out = [];
+      for(let i=0;i<count;i++) out.push(src[Math.floor(i/(count-1)*(src.length-1))] ?? src[src.length-1]);
+      return out;
+    },
+
+    escapeHtml(s){ const d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; },
+    tagIcon(content){
+      const c = content.toLowerCase();
+      if(c.includes('pause')) return 'pause_circle';
+      if(c.includes('emphasis')||c.includes('stress')) return 'priority_high';
+      return 'theater_comedy';
+    },
+    renderTagged(text, truncate){
+      let t = text || '';
+      if(truncate && t.length>truncate) t = t.slice(0,truncate)+'…';
+      const esc = this.escapeHtml(t);
+      return esc.replace(/\[([^\]]+)\]/g, (m,p1) => {
+        const icon = this.tagIcon(p1);
+        return `<span class="tag-chip"><span class="material-symbols-rounded" style="font-size:11px;">${icon}</span>${p1}</span>`;
+      });
+    },
+    countTags(text){ return ((text||'').match(/\[[^\]]+\]/g)||[]).length; },
+
+    selectClip(clip){ this.activeClipId = clip.id; },
+    openEditor(clip){ this.editingClipId = clip.id; this.activeClipId = clip.id; },
+    onLaneMouseDown(e){ if(e.target===e.currentTarget){ this.activeClipId=null; this.editingClipId=null; } },
+
+    addCharacter(){
+      if(!this.newChar.name.trim()) return;
+      this.characters.push({ id:this.nextId('char'), name:this.newChar.name.trim(), color:this.newChar.color, voiceId:this.newChar.voiceId.trim(), emotion:this.newChar.emotion });
+      this.newChar = { name:'', color: PALETTE[this.characters.length % PALETTE.length], voiceId:'', emotion:'neutral' };
+      this.showAddCharacter = false;
+    },
+    removeCharacter(id){ this.characters = this.characters.filter(c=>c.id!==id); },
+
+    addTrack(type){
+      this.tracks.push({ id:this.nextId('track'), type, name: type==='dialogue' ? 'New Dialogue' : 'New Sound', clips: [] });
+      this.showAddTrackMenu = false;
+    },
+    removeTrack(track){
+      this.tracks = this.tracks.filter(t=>t.id!==track.id);
+      if(this.editingClip==null) this.editingClipId=null;
+    },
+
+    trackEnd(track){ return track.clips.reduce((m,c)=>Math.max(m, c.start+this.effectiveDuration(c)), 0); },
+
+    addDialogueClip(track){
+      const clip = { id:this.nextId('clip'), type:'dialogue', characterId: this.characters[0] ? this.characters[0].id : null,
+        text:'', rendered:false, rendering:false, duration:null, start: track.clips.length ? this.trackEnd(track)+0.3 : 0,
+        fadeIn:0, fadeOut:0, waveform:[] };
+      track.clips.push(clip);
+      this.openEditor(clip);
+    },
+    addSoundFromPreset(track, preset){
+      const clip = { id:this.nextId('sfx'), type:'sfx', name:preset.name, icon:preset.icon, duration:preset.duration,
+        rendered:true, rendering:false, start: track.clips.length ? this.trackEnd(track)+0.2 : 0,
+        fadeIn:0.2, fadeOut:0.2, waveform: genWaveform(preset.name+'-'+this.idCounter, 48) };
+      track.clips.push(clip);
+      this.soundPickerTrackId = null;
+    },
+    findTrackOf(clip){ return this.tracks.find(t=>t.clips.some(c=>c.id===clip.id)); },
+    deleteClip(track, clip){
+      track.clips = track.clips.filter(c=>c.id!==clip.id);
+      if(this.editingClipId===clip.id) this.editingClipId=null;
+      if(this.activeClipId===clip.id) this.activeClipId=null;
+    },
+    duplicateClip(track, clip){
+      const copy = JSON.parse(JSON.stringify(clip));
+      copy.id = this.nextId('clip');
+      copy.start = round2(clip.start + this.effectiveDuration(clip) + 0.2);
+      track.clips.push(copy);
+      this.openEditor(copy);
+    },
+    deleteClipFromDrawer(){ const t=this.findTrackOf(this.editingClip); if(t) this.deleteClip(t, this.editingClip); },
+    duplicateClipFromDrawer(){ const t=this.findTrackOf(this.editingClip); if(t) this.duplicateClip(t, this.editingClip); },
+
+    regenerateClip(clip){
+      if(clip.rendering) return;
+      clip.rendering = true;
+      const estDur = this.estimateDuration(clip.text);
+      setTimeout(() => {
+        clip.duration = +(estDur*(0.92+Math.random()*0.16)).toFixed(2);
+        clip.waveform = genWaveform(clip.id+':'+Date.now(), 64);
+        clip.rendered = true;
+        clip.rendering = false;
+      }, 850);
+    },
+
+    insertTag(raw){
+      const ta = this.$refs.textArea;
+      const clip = this.editingClip;
+      if(!clip) return;
+      if(!ta){ clip.text = (clip.text||'') + raw; return; }
+      const start = ta.selectionStart ?? clip.text.length;
+      const end = ta.selectionEnd ?? clip.text.length;
+      clip.text = clip.text.slice(0,start) + raw + clip.text.slice(end);
+      this.$nextTick(() => { ta.focus(); const pos = start+raw.length; ta.setSelectionRange(pos,pos); });
+    },
+
+    snap(v){ return Math.round(v*20)/20; },
+    onHandleDown(e, clip, mode){
+      if(clip.rendering) return;
+      if(mode!=='move' && clip.type==='dialogue' && !clip.rendered) return;
+      e.preventDefault();
+      this.activeClipId = clip.id;
+      this.drag = {
+        mode, clip,
+        startX: e.clientX,
+        orig: { start: clip.start, duration: this.effectiveDuration(clip), fadeIn: clip.fadeIn, fadeOut: clip.fadeOut },
+      };
+    },
+    onWindowMove(e){
+      if(!this.drag) return;
+      const { mode, clip, orig, startX } = this.drag;
+      const dt = (e.clientX - startX) / this.zoom;
+      const minDur = 0.3;
+      if(mode==='move'){
+        clip.start = Math.max(0, this.snap(orig.start+dt));
+      } else if(mode==='trim-left'){
+        let newStart = orig.start + dt;
+        newStart = Math.max(0, Math.min(newStart, orig.start+orig.duration-minDur));
+        newStart = this.snap(newStart);
+        clip.start = newStart;
+        clip.duration = +(orig.duration - (newStart-orig.start)).toFixed(2);
+      } else if(mode==='trim-right'){
+        clip.duration = this.snap(Math.max(minDur, orig.duration+dt));
+      } else if(mode==='fade-in'){
+        const maxFade = (clip.duration!=null ? clip.duration : orig.duration)/2;
+        clip.fadeIn = Math.max(0, Math.min(maxFade, +(orig.fadeIn+dt).toFixed(2)));
+      } else if(mode==='fade-out'){
+        const maxFade = (clip.duration!=null ? clip.duration : orig.duration)/2;
+        clip.fadeOut = Math.max(0, Math.min(maxFade, +(orig.fadeOut-dt).toFixed(2)));
+      }
+    },
+    onWindowUp(){ this.drag = null; },
+
+    zoomIn(){ this.zoom = Math.min(240, Math.round(this.zoom*1.25)); },
+    zoomOut(){ this.zoom = Math.max(20, Math.round(this.zoom/1.25)); },
+
+    seek(e){
+      const rect = e.currentTarget.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      this.playhead = Math.max(0, x/this.zoom);
+    },
+    togglePlay(){
+      if(this.isPlaying){ clearInterval(this.playTimer); this.playTimer=null; this.isPlaying=false; return; }
+      this.isPlaying = true;
+      this.playTimer = setInterval(() => {
+        this.playhead = +(this.playhead+0.05).toFixed(2);
+        if(this.playhead>=this.totalDuration){ this.playhead=0; clearInterval(this.playTimer); this.playTimer=null; this.isPlaying=false; }
+      }, 50);
+    },
+
+    closeAllPopovers(){ this.showAddTrackMenu=false; this.soundPickerTrackId=null; },
+
+    buildExport(){
+      return {
+        version: 1,
+        project: this.projectName,
+        characters: this.characters.map(c => ({ id:c.id, name:c.name, color:c.color, voiceId:c.voiceId, defaultEmotion:c.emotion })),
+        tracks: this.tracks.map(t => ({
+          id: t.id, type: t.type, name: t.name,
+          clips: t.clips.map(c => c.type==='dialogue' ? {
+            id: c.id, type: 'dialogue', characterId: c.characterId, text: c.text,
+            start: round2(c.start), duration: round2(this.effectiveDuration(c)),
+            rendered: c.rendered, fadeIn: round2(c.fadeIn), fadeOut: round2(c.fadeOut),
+          } : {
+            id: c.id, type: 'sfx', name: c.name,
+            start: round2(c.start), duration: round2(c.duration),
+            fadeIn: round2(c.fadeIn), fadeOut: round2(c.fadeOut),
+          }),
+        })),
+      };
+    },
+    downloadJson(){
+      const blob = new Blob([this.exportedJson], {type:'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = (this.projectName||'audiobook').replace(/\s+/g,'_')+'.json';
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    },
+    copyJson(){
+      navigator.clipboard.writeText(this.exportedJson).then(() => {
+        this.copied = true; setTimeout(()=>this.copied=false, 1500);
+      });
+    },
+  },
+
+  mounted(){
+    window.addEventListener('mousemove', this.onWindowMove);
+    window.addEventListener('mouseup', this.onWindowUp);
+  },
+  beforeUnmount(){
+    window.removeEventListener('mousemove', this.onWindowMove);
+    window.removeEventListener('mouseup', this.onWindowUp);
+    if(this.playTimer) clearInterval(this.playTimer);
+  },
+}).mount('#app');
+</script>
+</body>
+</html>

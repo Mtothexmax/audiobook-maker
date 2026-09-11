@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EchoForge — Audiobook Studio Prototype</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config = { theme: { extend: { colors: {
+    ink: '#111827', panel: '#171c27', panel2: '#202635', accent: '#8b5cf6',
+    aqua: '#22d3ee', warm: '#f59e0b'
+  }}}}</script>
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,400,0,0" rel="stylesheet">
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin:0; background:#0d1119; color:#e5e7eb; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    .material-symbols-rounded { font-variation-settings:'FILL' 0,'wght' 400,'GRAD' 0,'opsz' 24; vertical-align:middle; }
+    .scrollbar::-webkit-scrollbar { width:8px; height:8px; } .scrollbar::-webkit-scrollbar-thumb { background:#374151; border-radius:8px; }
+    .wave { background-image: linear-gradient(90deg, transparent 0, transparent 5px, rgba(255,255,255,.08) 5px, rgba(255,255,255,.08) 6px); }
+    .gridline { background-image: repeating-linear-gradient(90deg, rgba(255,255,255,.08) 0, rgba(255,255,255,.08) 1px, transparent 1px, transparent 80px); }
+    .clip { position:absolute; top:18px; height:110px; border:1px solid rgba(255,255,255,.13); border-radius:10px; overflow:hidden; cursor:pointer; }
+    .clip:hover { border-color:#a78bfa; box-shadow:0 0 0 1px rgba(139,92,246,.35); }
+    .fade-handle { position:absolute; top:0; width:38px; height:25px; cursor:ew-resize; z-index:3; }
+    .fade-handle.left { left:0; border-left:2px solid #22d3ee; border-top:2px solid #22d3ee; clip-path:polygon(0 0,100% 0,0 100%); }
+    .fade-handle.right { right:0; border-right:2px solid #22d3ee; border-top:2px solid #22d3ee; clip-path:polygon(0 0,100% 0,100% 100%); }
+    .cut-handle { position:absolute; bottom:0; width:14px; height:15px; background:#f59e0b; cursor:ew-resize; z-index:3; border-radius:3px 3px 0 0; }
+    .cut-handle.left { left:8px; } .cut-handle.right { right:8px; }
+    .fake-wave { height:42px; display:flex; align-items:center; gap:2px; opacity:.8; padding:0 10px; }
+    .fake-wave i { display:block; width:3px; border-radius:2px; background:#c4b5fd; }
+    textarea { resize:none; }
+  </style>
+</head>
+<body>
+<div id="app" class="h-screen flex flex-col">
+  <header class="h-14 border-b border-white/10 bg-[#111620] flex items-center px-4 gap-4 shrink-0">
+    <div class="flex items-center gap-2 font-semibold tracking-tight w-64"><span class="material-symbols-rounded text-violet-400">graphic_eq</span> EchoForge <span class="text-xs text-gray-500 font-normal">Studio</span></div>
+    <div class="flex items-center gap-1 text-sm text-gray-400">
+      <button class="px-3 py-1.5 rounded hover:bg-white/5">Project</button>
+      <button class="px-3 py-1.5 rounded hover:bg-white/5">Edit</button>
+      <button class="px-3 py-1.5 rounded hover:bg-white/5">View</button>
+    </div>
+    <div class="flex-1 text-center text-sm text-gray-300">The Glass Harbor <span class="text-gray-600">·</span> Chapter 07</div>
+    <button @click="exportJson" class="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-sm flex items-center gap-1"><span class="material-symbols-rounded text-base">download</span> Export JSON</button>
+  </header>
+
+  <div class="flex flex-1 min-h-0">
+    <!-- Characters -->
+    <aside class="w-64 border-r border-white/10 bg-[#111620] flex flex-col shrink-0">
+      <div class="p-4 border-b border-white/10 flex justify-between items-center">
+        <div><div class="text-xs uppercase tracking-widest text-gray-500">Cast</div><div class="font-semibold mt-1">Characters</div></div>
+        <button @click="addCharacter" class="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10"><span class="material-symbols-rounded">add</span></button>
+      </div>
+      <div class="p-3 space-y-2 overflow-auto scrollbar">
+        <div v-for="c in characters" :key="c.id" @click="selectedCharacter=c.id" :class="['p-3 rounded-xl border cursor-pointer', selectedCharacter===c.id ? 'border-violet-500/60 bg-violet-500/10':'border-white/5 bg-white/[.025] hover:bg-white/5']">
+          <div class="flex items-center gap-3">
+            <div :style="{background:c.color}" class="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-white">{{c.initials}}</div>
+            <div class="min-w-0 flex-1"><div class="font-medium text-sm">{{c.name}}</div><div class="text-xs text-gray-500 truncate">{{c.voice}}</div></div>
+            <span class="material-symbols-rounded text-gray-600 text-base">drag_indicator</span>
+          </div>
+          <div class="mt-2 flex gap-1.5 flex-wrap">
+            <span v-for="tag in c.emotions" class="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-gray-400">{{tag}}</span>
+          </div>
+        </div>
+      </div>
+      <div class="mt-auto p-3 border-t border-white/10 text-xs text-gray-500">
+        <div class="flex justify-between mb-2"><span>Voice engine</span><b class="text-gray-300">Fish Audio</b></div>
+        <div class="flex justify-between"><span>Rendered</span><b class="text-emerald-400">72%</b></div>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="flex-1 min-w-0 flex flex-col">
+      <div class="h-12 border-b border-white/10 flex items-center gap-2 px-4 bg-[#151a24]">
+        <button @click="play=!play" class="w-8 h-8 rounded-full bg-violet-600 flex items-center justify-center"><span class="material-symbols-rounded">{{play?'pause':'play_arrow'}}</span></button>
+        <button class="w-8 h-8 text-gray-400 hover:text-white"><span class="material-symbols-rounded">skip_previous</span></button>
+        <span class="font-mono text-xs text-gray-400 w-24">{{play?'00:14.82':'00:00.00'}} / 08:42.30</span>
+        <div class="h-1 rounded bg-white/10 flex-1 max-w-md"><div class="h-full bg-violet-500 rounded" :style="{width:play?'3%':'0%'}"></div></div>
+        <div class="ml-auto flex items-center gap-1">
+          <button @click="zoom=Math.max(50,zoom-25)" class="icon"><span class="material-symbols-rounded">zoom_out</span></button>
+          <span class="text-xs text-gray-500 w-10 text-center">{{zoom}}%</span>
+          <button @click="zoom=Math.min(200,zoom+25)" class="icon"><span class="material-symbols-rounded">zoom_in</span></button>
+          <button class="ml-2 px-2 py-1 rounded bg-white/5 text-xs">Snap</button>
+        </div>
+      </div>
+
+      <section class="flex-1 min-h-0 flex flex-col">
+        <div class="h-9 bg-[#0f141d] border-b border-white/10 flex items-end text-[10px] text-gray-600 overflow-hidden">
+          <div class="ml-24 flex w-[1800px] justify-between px-1"><span>00:00</span><span>00:30</span><span>01:00</span><span>01:30</span><span>02:00</span><span>02:30</span><span>03:00</span><span>03:30</span><span>04:00</span></div>
+        </div>
+        <div class="flex-1 overflow-auto scrollbar bg-[#0d121a]">
+          <div class="relative min-w-[1900px] h-[390px] gridline" :style="{backgroundSize:(80*zoom/100)+'px 100%'}">
+            <div class="absolute left-0 top-0 bottom-0 w-24 bg-[#111620] border-r border-white/10 z-10">
+              <div class="h-[130px] border-b border-white/10 flex items-center justify-center text-[10px] text-gray-600">TRACK 01</div>
+              <div class="h-[130px] border-b border-white/10 flex items-center justify-center text-[10px] text-gray-600">TRACK 02</div>
+              <div class="h-[130px] flex items-center justify-center text-[10px] text-gray-600">SFX</div>
+            </div>
+
+            <div class="absolute left-24 right-0 top-0 h-[130px] border-b border-white/10">
+              <div v-for="clip in clips.filter(x=>x.track===1)" :key="clip.id" @dblclick="openClip(clip)" @click="selectedClip=clip.id"
+                :style="{left:(clip.start*zoom/100)+'px',width:(clip.duration*zoom/100)+'px', background:clip.rendered?'#252238':'#202631'}"
+                :class="['clip', selectedClip===clip.id?'ring-2 ring-violet-500':'' ]">
+                <div class="fade-handle left"></div><div class="fade-handle right"></div><div class="cut-handle left"></div><div class="cut-handle right"></div>
+                <div class="px-2 pt-2 flex items-center gap-2">
+                  <div :style="{background:character(clip.character).color}" class="w-6 h-6 rounded-full text-[9px] flex items-center justify-center font-bold">{{character(clip.character).initials}}</div>
+                  <div class="text-xs font-semibold">{{character(clip.character).name}}</div>
+                  <span v-if="!clip.rendered" class="ml-auto text-[10px] text-amber-400 flex gap-1 items-center"><span class="material-symbols-rounded text-xs">schedule</span> estimated</span>
+                </div>
+                <div class="px-2 text-[10px] text-gray-400 truncate mt-1">{{clip.text}}</div>
+                <div v-if="clip.rendered" class="fake-wave">
+                  <i v-for="n in 62" :key="n" :style="{height:(8+Math.abs(Math.sin(n*1.7+clip.id))*28)+'px'}"></i>
+                </div>
+                <div v-else class="mx-2 mt-2 h-8 border border-dashed border-amber-500/30 rounded flex items-center justify-center text-[10px] text-gray-500">No waveform — duration estimated from text</div>
+              </div>
+            </div>
+
+            <div class="absolute left-24 right-0 top-[130px] h-[130px] border-b border-white/10">
+              <div v-for="clip in clips.filter(x=>x.track===2)" :key="clip.id" @dblclick="openClip(clip)" @click="selectedClip=clip.id"
+                :style="{left:(clip.start*zoom/100)+'px',width:(clip.duration*zoom/100)+'px'}" :class="['clip bg-[#182b31]', selectedClip===clip.id?'ring-2 ring-cyan-500':'']">
+                <div class="fade-handle left"></div><div class="fade-handle right"></div><div class="cut-handle left"></div><div class="cut-handle right"></div>
+                <div class="px-2 pt-2 flex items-center gap-2 text-cyan-300"><span class="material-symbols-rounded text-base">volume_up</span><span class="text-xs font-medium">{{clip.name}}</span></div>
+                <div class="fake-wave mt-2"><i v-for="n in 50" :key="n" :style="{height:(5+Math.abs(Math.sin(n*.9))*22)+'px',background:'#67e8f9'}"></i></div>
+              </div>
+            </div>
+            <div class="absolute left-24 right-0 top-[260px] h-[130px]">
+              <div class="absolute left-[90px] top-5 w-[250px] h-16 rounded-lg border border-dashed border-white/15 bg-white/[.02] flex items-center justify-center text-xs text-gray-600">
+                Drop sound here
+              </div>
+            </div>
+            <div class="absolute left-[24%] top-0 bottom-0 w-px bg-violet-400 z-20"><div class="absolute -left-1.5 top-0 w-3 h-3 rounded-b bg-violet-400"></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Editor -->
+      <section v-if="activeClip" class="h-[315px] border-t border-white/10 bg-[#151a24] flex shrink-0">
+        <div class="flex-1 p-5 min-w-0">
+          <div class="flex items-center gap-3 mb-3">
+            <div :style="{background:character(activeClip.character).color}" class="w-9 h-9 rounded-full flex items-center justify-center font-bold">{{character(activeClip.character).initials}}</div>
+            <div><div class="font-semibold">{{character(activeClip.character).name}}</div><div class="text-xs text-gray-500">Clip {{activeClip.id}} · {{activeClip.rendered?'Rendered':'Not rendered'}}</div></div>
+            <select v-model="activeClip.character" class="ml-4 bg-[#202635] border border-white/10 rounded px-2 py-1 text-xs">
+              <option v-for="c in characters" :value="c.id">{{c.name}}</option>
+            </select>
+            <button @click="regenerate" class="ml-auto px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-sm flex items-center gap-1"><span class="material-symbols-rounded text-sm">refresh</span> Regenerate</button>
+          </div>
+          <div class="text-xs uppercase tracking-widest text-gray-500 mb-2">Script + Fish Audio controls</div>
+          <textarea v-model="activeClip.text" class="w-full h-40 bg-[#0e131b] border border-white/10 rounded-xl p-3 text-sm leading-6 outline-none focus:border-violet-500/60"></textarea>
+          <div class="mt-2 flex gap-2 text-[11px]">
+            <button class="px-2 py-1 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">[laugh]</button>
+            <button class="px-2 py-1 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">[whisper]</button>
+            <button class="px-2 py-1 rounded bg-violet-500/10 text-violet-300 border border-violet-500/20">[excited]</button>
+            <button class="px-2 py-1 rounded bg-white/5 text-gray-400">+ emotion</button>
+            <button class="px-2 py-1 rounded bg-white/5 text-gray-400">+ pause</button>
+          </div>
+        </div>
+        <div class="w-72 border-l border-white/10 p-4 overflow-auto scrollbar">
+          <div class="text-xs uppercase tracking-widest text-gray-500 mb-3">Audio Effects</div>
+          <div v-for="fx in effects" class="flex items-center gap-2 p-2 rounded-lg hover:bg-white/5">
+            <input type="checkbox" v-model="fx.on" class="accent-violet-500">
+            <span class="text-sm flex-1">{{fx.name}}</span>
+            <span class="text-[10px] text-gray-500">{{fx.value}}</span>
+          </div>
+          <div class="border-t border-white/10 my-3"></div>
+          <button @click="addSound" class="w-full p-2 rounded-lg border border-dashed border-white/15 hover:border-cyan-400/50 text-xs text-gray-400 flex justify-center gap-1"><span class="material-symbols-rounded text-sm">library_music</span> Add sound / SFX</button>
+          <div class="mt-4 text-xs uppercase tracking-widest text-gray-500 mb-2">Clip timing</div>
+          <div class="text-xs text-gray-400">Estimated length <b class="text-gray-200">{{activeClip.duration.toFixed(1)}}s</b></div>
+          <div class="text-xs text-gray-500 mt-1">Drag top corners to fade · bottom handles to cut</div>
+        </div>
+      </section>
+      <section v-else class="h-[315px] border-t border-white/10 bg-[#151a24] flex items-center justify-center text-gray-600 text-sm">
+        Double-click a timeline clip to edit its text, emotion, pauses, voice, and effects.
+      </section>
+    </main>
+  </div>
+
+  <div v-if="toast" class="fixed bottom-5 right-5 bg-[#222938] border border-white/10 shadow-2xl rounded-xl px-4 py-3 text-sm">{{toast}}</div>
+</div>
+
+<script>
+const {createApp, computed, ref} = Vue;
+createApp({
+  setup(){
+    const zoom=ref(100), play=ref(false), selectedClip=ref(2), selectedCharacter=ref(1), toast=ref('');
+    const characters=ref([
+      {id:1,name:'Mara',initials:'M',voice:'Young · warm · DE',color:'#7c3aed',emotions:['calm','curious','fear']},
+      {id:2,name:'Elias',initials:'E',voice:'Low · restrained · DE',color:'#0891b2',emotions:['dry','angry','whisper']},
+      {id:3,name:'Narrator',initials:'N',voice:'Neutral · cinematic',color:'#64748b',emotions:['neutral','dramatic']}
+    ]);
+    const clips=ref([
+      {id:1,track:1,start:20,duration:120,character:3,rendered:true,text:'The harbor lights flickered through the fog.'},
+      {id:2,track:1,start:148,duration:155,character:1,rendered:true,text:'Mara: “Did you hear that?” [fear] [pause 0.4s]'},
+      {id:3,track:1,start:312,duration:125,character:2,rendered:false,text:'Elias lowered his voice. [whisper] “Don’t move.”'},
+      {id:4,track:1,start:445,duration:105,character:1,rendered:true,text:'She held her breath and listened.'},
+      {id:5,track:2,start:210,duration:80,character:3,rendered:true,name:'Harbor ambience',text:'waves + distant buoy'},
+      {id:6,track:2,start:385,duration:38,character:3,rendered:true,name:'Footsteps',text:'wet stone footsteps'}
+    ]);
+    const effects=ref([{name:'Echo',on:true,value:'18%'},{name:'Delay',on:false,value:'240 ms'},{name:'Pitch',on:false,value:'+0.0 st'},{name:'Reverb',on:true,value:'12%'},{name:'Compressor',on:false,value:'-3 dB'}]);
+    const activeClip=computed(()=>clips.value.find(c=>c.id===selectedClip.value));
+    const character=id=>characters.value.find(c=>c.id===id)||characters.value[0];
+    function openClip(c){selectedClip.value=c.id}
+    function regenerate(){activeClip.value.rendered=true; toast.value='Fish Audio render queued · waveform will appear when ready'; setTimeout(()=>toast.value='',2200)}
+    function addCharacter(){const id=Date.now(); characters.value.push({id,name:'New Character',initials:'N',voice:'Choose voice',color:'#be185d',emotions:['neutral']}); selectedCharacter.value=id}
+    function addSound(){clips.value.push({id:Date.now(),track:2,start:500,duration:55,character:3,rendered:true,name:'New SFX',text:'sound effect'}); toast.value='Sound clip added to SFX track'; setTimeout(()=>toast.value='',1800)}
+    function exportJson(){
+      const data={version:1,title:'The Glass Harbor',engine:'fish-audio',characters:characters.value,clips:clips.value.map(c=>({...c,effects:effects.value.filter(x=>x.on).map(x=>x.name)}))};
+      const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}), a=document.createElement('a');
+      a.href=URL.createObjectURL(blob); a.download='glass-harbor-project.json'; a.click(); URL.revokeObjectURL(a.href);
+      toast.value='Project JSON exported'; setTimeout(()=>toast.value='',1800)
+    }
+    return {zoom,play,characters,clips,effects,activeClip,selectedClip,selectedCharacter,character,openClip,regenerate,addCharacter,addSound,exportJson,toast}
+  }
+}).mount('#app');
+</script>
+</body>
+</html>

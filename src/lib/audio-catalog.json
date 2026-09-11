@@ -1,0 +1,135 @@
+{
+	"ambience": [
+		{
+			"id": "ambience-autumn-wind-air",
+			"name": "Autumn Wind",
+			"icon": "air",
+			"file": "/assets/ambience/Autumn%20Wind__air.wav",
+			"fileName": "Autumn Wind__air.wav",
+			"category": "ambience"
+		},
+		{
+			"id": "ambience-birdsong-nature",
+			"name": "Birdsong",
+			"icon": "nature",
+			"file": "/assets/ambience/Birdsong__nature.mp3",
+			"fileName": "Birdsong__nature.mp3",
+			"category": "ambience"
+		},
+		{
+			"id": "ambience-bonfire-local-fire-department",
+			"name": "Bonfire",
+			"icon": "local_fire_department",
+			"file": "/assets/ambience/Bonfire__local_fire_department.wav",
+			"fileName": "Bonfire__local_fire_department.wav",
+			"category": "ambience"
+		},
+		{
+			"id": "ambience-cabin-rain-cabin",
+			"name": "Cabin Rain",
+			"icon": "cabin",
+			"file": "/assets/ambience/Cabin%20Rain__cabin.wav",
+			"fileName": "Cabin Rain__cabin.wav",
+			"category": "ambience"
+		},
+		{
+			"id": "ambience-cafeteria-murmur-local-cafe",
+			"name": "Cafeteria Murmur",
+			"icon": "local_cafe",
+			"file": "/assets/ambience/Cafeteria%20Murmur__local_cafe.wav",
+			"fileName": "Cafeteria Murmur__local_cafe.wav",
+			"category": "ambience"
+		},
+		{
+			"id": "ambience-city-street-location-city",
+			"name": "City Street",
+			"icon": "location_city",
+			"file": "/assets/ambience/City%20Street__location_city.wav",
+			"fileName": "City Street__location_city.wav",
+			"category": "ambience"
+		},
+		{
+			"id": "ambience-crowd-murmur-groups",
+			"name": "Crowd Murmur",
+			"icon": "groups",
+			"file": "/assets/ambience/Crowd%20Murmur__groups.mp3",
+			"fileName": "Crowd Murmur__groups.mp3",
+			"category": "ambience"
+		},
+		{
+			"id": "ambience-dark-cave-dark-mode",
+			"name": "Dark Cave",
+			"icon": "dark_mode",
+			"file": "/assets/ambience/Dark%20Cave__dark_mode.wav",
+			"fileName": "Dark Cave__dark_mode.wav",
+			"category": "ambience"
+		},
+		{
+			"id": "ambience-forest-birds-park",
+			"name": "Forest Birds",
+			"icon": "park",
+			"file": "/assets/ambience/Forest%20Birds__park.wav",
+			"fileName": "Forest Birds__park.wav",
+			"category": "ambience"
+		},
+		{
+			"id": "ambience-rain-shower-rainy",
+			"name": "Rain Shower",
+			"icon": "rainy",
+			"file": "/assets/ambience/Rain%20Shower__rainy.mp3",
+			"fileName": "Rain Shower__rainy.mp3",
+			"category": "ambience"
+		},
+		{
+			"id": "ambience-rainy-traffic-directions-car",
+			"name": "Rainy Traffic",
+			"icon": "directions_car",
+			"file": "/assets/ambience/Rainy%20Traffic__directions_car.wav",
+			"fileName": "Rainy Traffic__directions_car.wav",
+			"category": "ambience"
+		},
+		{
+			"id": "ambience-shopping-mall-shopping-bag",
+			"name": "Shopping Mall",
+			"icon": "shopping_bag",
+			"file": "/assets/ambience/Shopping%20Mall__shopping_bag.wav",
+			"fileName": "Shopping Mall__shopping_bag.wav",
+			"category": "ambience"
+		},
+		{
+			"id": "ambience-spring-stream-water-drop",
+			"name": "Spring Stream",
+			"icon": "water_drop",
+			"file": "/assets/ambience/Spring%20Stream__water_drop.wav",
+			"fileName": "Spring Stream__water_drop.wav",
+			"category": "ambience"
+		},
+		{
+			"id": "ambience-thunder-lightning-thunderstorm",
+			"name": "Thunder & Lightning",
+			"icon": "thunderstorm",
+			"file": "/assets/ambience/Thunder%20%26%20Lightning__thunderstorm.wav",
+			"fileName": "Thunder & Lightning__thunderstorm.wav",
+			"category": "ambience"
+		},
+		{
+			"id": "ambience-wind-gust-air",
+			"name": "Wind Gust",
+			"icon": "air",
+			"file": "/assets/ambience/Wind%20Gust__air.mp3",
+			"fileName": "Wind Gust__air.mp3",
+			"category": "ambience"
+		},
+		{
+			"id": "ambience-winter-storm-weather-snowy",
+			"name": "Winter Storm",
+			"icon": "weather_snowy",
+			"file": "/assets/ambience/Winter%20Storm__weather_snowy.wav",
+			"fileName": "Winter Storm__weather_snowy.wav",
+			"category": "ambience"
+		}
+	],
+	"music": [],
+	"sounds": [],
+	"generatedAt": "2026-09-11T18:27:27.942Z"
+}
