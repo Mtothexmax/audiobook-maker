@@ -304,11 +304,6 @@
 				{#if clip.type === 'dialogue'}
 										{#if character?.face}
 											<Avatar face={character.face} size={18} />
-										{:else}
-											<span
-												class="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full bg-gray-700 text-[9px] font-bold text-gray-300"
-												>?</span
-											>
 										{/if}
 										<span class="truncate text-[11px] font-semibold flex items-center gap-1" style="color: {character?.color ?? '#9ca3af'}">
 											{#if character}
@@ -393,8 +388,8 @@
 									{/if}
 			</div>
 
-			<!-- waveform / estimate (trimmed waveforms are cut, never stretched) -->
-			<div class="pointer-events-none my-0.5 flex min-h-0 flex-1 items-end gap-[2px] px-1">
+			<!-- waveform / estimate (edge to edge, trimmed waveforms are cut, never stretched) -->
+			<div class="pointer-events-none my-0.5 -mx-2 flex min-h-0 flex-1 items-end gap-[2px]">
 				{#if clip.waveform.length}
 					{#each sampleWaveform(clip.waveform, barCount) as v, i (i)}
 						<div
