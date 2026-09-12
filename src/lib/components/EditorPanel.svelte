@@ -7,40 +7,142 @@
 		clipById,
 		trackOfClip,
 		regenerateClip,
+		renderAmbienceClip,
 		invalidateRender,
-		deleteClip,
-		duplicateClip,
-		effectiveDuration,
 		clipHasAudio,
+		clipEffects,
+		EFFECT_TYPES,
+		nextId,
+		toast,
+		importSoundFile,
+		resolveSoundBuffer,
 		VOICE_PRESETS
 	} from '$lib/project.svelte';
-	import { EMOTIONS, estimateDuration, renderTagged, countTags } from '$lib/tags';
-	import { getBuffer, previewBuffer, stopPreview, resumeContext } from '$lib/audio';
+	import type { EffectParam } from '$lib/types';
+	import { EMOTIONS, renderTagged, countTags } from '$lib/tags';
+	import {
+		getBuffer,
+		previewBuffer,
+		previewLayers,
+		loadAudioBuffer,
+		stopPreview,
+		resumeContext
+	} from '$lib/audio';
 	import { AUDIO_CATALOG } from '$lib/project.svelte';
 	import Knob from './Knob.svelte';
 	import Avatar from './Avatar.svelte';
 
 	let ta = $state<HTMLTextAreaElement | undefined>(undefined);
 	let previewing = $state(false);
+	let loopPreview = $state(false);
 	let previewTimer: ReturnType<typeof setTimeout> | null = null;
 
 	const clip = $derived(clipById(ui.editingClipId));
 	const character = $derived(clip && clip.type === 'dialogue' ? charById(clip.characterId) : undefined);
 	const trackName = $derived(clip ? (trackOfClip(clip.id)?.name ?? '') : '');
-	const effDur = $derived(clip ? effectiveDuration(clip) : 0);
+
 	const playable = $derived(clip ? clipHasAudio(clip.id) : false);
+	const hasAudibleAmbience = $derived(
+		clip && clip.type === 'ambience'
+			? (clip.layers || []).some((l) => l.enabled && l.volume > 0.01)
+			: true
+	);
+
+	function stopLocalPreview() {
+		stopPreview();
+		previewing = false;
+		if (previewTimer) {
+			clearTimeout(previewTimer);
+			previewTimer = null;
+		}
+	}
+
+	function startPreviewTimer(seconds: number) {
+		previewing = true;
+		if (previewTimer) clearTimeout(previewTimer);
+		previewTimer = null;
+		// In loop mode the preview runs forever until Stop; otherwise stop the
+		// button state after one pass.
+		if (!loopPreview) {
+			previewTimer = setTimeout(() => {
+				previewing = false;
+				previewTimer = null;
+			}, seconds * 1000 + 120);
+		}
+	}
 
 	function preview() {
-		if (!clip || clip.type !== 'dialogue' && clip.type !== 'ambience') return;
-		const buffer = getBuffer(clip.id);
-		if (!buffer) return;
-		void resumeContext().then(() => {
-			previewBuffer(buffer, clip.fadeIn, clip.fadeOut);
-			previewing = true;
-			if (previewTimer) clearTimeout(previewTimer);
-			previewTimer = setTimeout(() => (previewing = false), buffer.duration * 1000 + 120);
+		const c = clip;
+		if (!c || (c.type !== 'dialogue' && c.type !== 'ambience' && c.type !== 'sound')) return;
+		// Play button doubles as Stop while a preview is running.
+		if (previewing) {
+			stopLocalPreview();
+			return;
+		}
+		void resumeContext().then(async () => {
+			if (c.type === 'sound') {
+				const buffer = await resolveSoundBuffer(c);
+				if (!buffer) {
+					toast('Load an MP3 first');
+					return;
+				}
+				previewBuffer(buffer, c.fadeIn, c.fadeOut, { loop: loopPreview });
+				startPreviewTimer(Math.min(buffer.duration, c.duration));
+				return;
+			}
+			if (c.type === 'dialogue') {
+				const buffer = getBuffer(c.id);
+				if (!buffer) return;
+				previewBuffer(buffer, c.fadeIn, c.fadeOut, { loop: loopPreview });
+				startPreviewTimer(buffer.duration);
+			} else {
+				const mixed = getBuffer(c.id);
+				if (mixed) {
+					previewBuffer(mixed, c.fadeIn, c.fadeOut, { loop: loopPreview });
+					startPreviewTimer(mixed.duration);
+				} else {
+					// No mixdown yet — live-mix the enabled layers, no waveform needed.
+					const active = (c.layers || []).filter((l) => l.enabled && l.volume > 0.01);
+					if (!active.length) {
+						toast('Enable at least one layer first');
+						return;
+					}
+					try {
+						const parts = [];
+						for (const l of active) {
+							parts.push({ buffer: await loadAudioBuffer(l.file), gain: l.volume });
+						}
+						previewLayers(parts);
+						startPreviewTimer(c.duration);
+					} catch {
+						toast('Could not load ambience audio');
+					}
+				}
+			}
 		});
 	}
+
+	function toggleLoop() {
+		const wasPlaying = previewing;
+		loopPreview = !loopPreview;
+		// Restart an in-flight preview so the new mode applies immediately.
+		if (wasPlaying) {
+			stopLocalPreview();
+			preview();
+		}
+	}
+
+	// Stop any running preview when moving to another clip.
+	$effect(() => {
+		void ui.editingClipId;
+		stopPreview();
+		previewing = false;
+		loopPreview = false;
+		if (previewTimer) {
+			clearTimeout(previewTimer);
+			previewTimer = null;
+		}
+	});
 
 	function onTextInput(e: Event) {
 		if (!clip || clip.type !== 'dialogue') return;
@@ -72,65 +174,110 @@
 		});
 	}
 
-	function clampFade(v: number, max: number): number {
-		if (Number.isNaN(v)) return 0;
-		return Math.max(0, Math.min(max, v));
+	function addAmbienceLayer(item: { id: string; name: string; icon: string; file: string }) {
+		if (!clip || clip.type !== 'ambience') return;
+		if (!clip.layers) clip.layers = [];
+		clip.layers = [...clip.layers, { id: item.id, name: item.name, icon: item.icon, file: item.file, volume: 0.5, enabled: true }];
 	}
 
-	// Ambience Mixer helpers
-	function updateLayerVolume(layer: { id: string; volume: number; enabled: boolean }, value: number) {
-		layer.volume = value;
-		layer.enabled = value > 0.05;
+	function removeAmbienceLayer(layerId: string) {
+		if (!clip || clip.type !== 'ambience' || !clip.layers) return;
+		clip.layers = clip.layers.filter((l) => l.id !== layerId);
 	}
 
-	function toggleLayerEnabled(layer: { enabled: boolean; volume: number }) {
-		if (layer.enabled) {
-			layer.enabled = false;
-			layer.volume = 0;
-		} else {
-			layer.enabled = true;
-			layer.volume = 0.5;
+	function onRegenerate() {
+		if (!clip) return;
+		if (clip.type === 'ambience') void renderAmbienceClip(clip.id);
+		else void regenerateClip(clip.id);
+	}
+
+	/* Sound MP3 upload (bytes → audio cache, JSON keeps the reference) */
+
+	let soundFileInput = $state<HTMLInputElement | undefined>(undefined);
+	let importingSound = $state(false);
+
+	function uploadDisplayName(file: string): string {
+		if (!file.startsWith('upload:')) return file;
+		const dash = file.indexOf('-');
+		return dash >= 0 ? file.slice(dash + 1) : file;
+	}
+
+	async function onSoundFilePicked(e: Event) {
+		const input = e.target as HTMLInputElement;
+		const file = input.files?.[0];
+		input.value = '';
+		if (!file || !clip || clip.type !== 'sound') return;
+		importingSound = true;
+		try {
+			await importSoundFile(clip.id, file);
+		} finally {
+			importingSound = false;
 		}
 	}
 
-	function getAmbienceLayers(clip: { layers: Array<{ id: string; name: string; icon: string; file: string; volume: number; enabled: boolean }> }) {
-		return clip.layers || [];
+	/* ------------------------------------------------------------------ */
+	/* FX rack (FL-style): list left, selected effect's knobs right        */
+	/* ------------------------------------------------------------------ */
+
+	let selectedFxId = $state<string | null>(null);
+	let showAddMenu = $state(false);
+
+	const fxList = $derived(clip ? clipEffects(clip) : []);
+	const selectedFx = $derived(
+		fxList.find((f) => f.id === selectedFxId) ?? fxList[0] ?? null
+	);
+
+	function fxIcon(name: string): string {
+		return EFFECT_TYPES.find((t) => t.name === name)?.icon ?? 'tune';
 	}
 
-	function previewAmbienceMix() {
-		if (!clip || clip.type !== 'ambience') return;
-		// For preview, we'd need to mix multiple layers - for now just preview first enabled layer
-		const activeLayer = (clip.layers || []).find(l => l.enabled && l.volume > 0.05);
-		if (!activeLayer) return;
-		void resumeContext().then(async () => {
-			const { loadAudioBuffer } = await import('$lib/audio');
-			try {
-				const buffer = await loadAudioBuffer(activeLayer.file);
-				previewBuffer(buffer, clip.fadeIn, clip.fadeOut);
-				previewing = true;
-				if (previewTimer) clearTimeout(previewTimer);
-				previewTimer = setTimeout(() => (previewing = false), buffer.duration * 1000 + 120);
-			} catch (e) {
-				console.warn('Could not preview ambience layer:', e);
-			}
-		});
+	function addFx(typeName: string) {
+		if (!clip) return;
+		const def = EFFECT_TYPES.find((t) => t.name === typeName);
+		if (!def) return;
+		const fx = { id: nextId('fx'), name: def.name, on: true, params: def.makeParams() };
+		clipEffects(clip).push(fx);
+		selectedFxId = fx.id;
+		showAddMenu = false;
+	}
+
+	function removeSelectedFx() {
+		if (!clip) return;
+		const list = clipEffects(clip);
+		const target = list.find((f) => f.id === selectedFxId) ?? list[0];
+		if (!target) return;
+		const idx = list.findIndex((f) => f.id === target.id);
+		if (idx >= 0) list.splice(idx, 1);
+		if (selectedFxId === target.id) selectedFxId = null;
+	}
+
+	/** '180 ms' / '35%' / '-18 dB' / '+2.5 st' / '30% L' / 'C' */
+	function formatParam(p: EffectParam): string {
+		if (p.name === 'Pan') {
+			const v = Math.round(p.value);
+			if (v === 0) return 'C';
+			return `${Math.abs(v)}% ${v < 0 ? 'L' : 'R'}`;
+		}
+		const v = p.step >= 1 ? Math.round(p.value) : +p.value.toFixed(1);
+		const sign = p.min < 0 && p.value > 0 ? '+' : '';
+		return `${sign}${v}${p.unit}`;
 	}
 </script>
 
+{#if clip}
 <section class="flex h-[330px] shrink-0 flex-col border-t border-white/10 bg-[#151a24]">
-	{#if clip}
 		<div class="flex min-h-0 flex-1">
 			<!-- main -->
 			<div class="scrollbar min-w-0 flex-1 overflow-y-auto p-4">
 				<!-- header -->
 				<div class="mb-3 flex items-center gap-3">
 					{#if clip.type === 'dialogue'}
-						{#if character}
+						{#if character?.face}
 							<Avatar face={character.face} size={36} />
 						{:else}
 							<div
 								class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gray-700 text-sm font-bold text-gray-300"
-								>?</div
+								>{character?.name.trim().charAt(0).toUpperCase() || '?'}</div
 							>
 						{/if}
 					{:else if clip.type === 'ambience'}
@@ -160,7 +307,9 @@
 										: 'Not rendered'
 								: clip.type === 'ambience'
 									? 'Mixable multi-loop ambience'
-									: 'Library sound'}
+									: clip.file
+										? 'Loaded sound'
+										: 'No audio — load an MP3'}
 						</div>
 					</div>
 
@@ -182,44 +331,185 @@
 						</select>
 					{/if}
 
-					{#if clip.type === 'dialogue' || clip.type === 'ambience'}
-						{#if playable}
+					{#if clip.type === 'dialogue' || clip.type === 'ambience' || clip.type === 'sound'}
+						{@const canPreview =
+							playable ||
+							(clip.type === 'ambience' && hasAudibleAmbience) ||
+							(clip.type === 'sound' && !!clip.file)}
+						{#if canPreview}
 							<button
-								class="ml-auto flex shrink-0 items-center gap-1.5 rounded-lg border border-white/10 bg-[#202635] px-3 py-1.5 text-xs font-semibold text-gray-200 transition hover:bg-[#262b36]"
+								class="ml-auto flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition
+									{previewing
+										? 'border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/20'
+										: 'border-white/10 bg-[#202635] text-gray-200 hover:bg-[#262b36]'}"
 								onclick={preview}
-								title="Preview the rendered audio"
+								title={previewing
+									? 'Stop preview'
+									: clip.type === 'ambience' && !playable
+										? 'Preview the live layer mix (no waveform needed)'
+										: 'Preview'}
 							>
 								<span class="material-symbols-rounded text-sm">
-									{previewing ? 'graphic_eq' : 'play_arrow'}
+									{previewing ? 'stop' : 'play_arrow'}
 								</span>
-								{previewing ? 'Playing' : 'Play'}
+								{previewing ? 'Stop' : 'Play'}
+							</button>
+							<button
+								class="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-lg border transition
+									{loopPreview
+										? 'border-violet-500/60 bg-violet-500/15 text-violet-300'
+										: 'border-white/10 bg-[#202635] text-gray-500 hover:text-gray-300'}"
+								onclick={toggleLoop}
+								title={loopPreview ? 'Loop on — preview repeats forever' : 'Loop off — click to repeat forever'}
+							>
+								<span class="material-symbols-rounded text-sm">repeat</span>
 							</button>
 						{:else}
 							<div class="ml-auto"></div>
 						{/if}
 
-						<button
-							class="flex shrink-0 items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-violet-500 disabled:opacity-50"
-							onclick={() => regenerateClip(clip.id)}
-							disabled={clip.rendering}
-						>
-							<span class="material-symbols-rounded text-sm {clip.rendering ? 'animate-spin' : ''}">
-								{clip.rendering ? 'progress_activity' : 'autorenew'}
-							</span>
-							{clip.rendering ? 'Rendering...' : clip.rendered ? 'Regenerate' : 'Render audio'}
-						</button>
+						{#if clip.type === 'dialogue' || clip.type === 'ambience'}
+							<button
+								class="flex shrink-0 items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-violet-500 disabled:opacity-50"
+								onclick={onRegenerate}
+								disabled={clip.rendering || !hasAudibleAmbience}
+								title={clip.type === 'ambience' ? 'Mix enabled layers into a waveform of the visible clip length' : 'Render with Fish Audio'}
+							>
+								<span class="material-symbols-rounded text-sm {clip.rendering ? 'animate-spin' : ''}">
+									{clip.rendering ? 'progress_activity' : 'autorenew'}
+								</span>
+								{clip.rendering
+									? 'Rendering...'
+									: clip.type === 'ambience'
+										? 'Render waveform'
+										: clip.rendered
+											? 'Regenerate'
+											: 'Render audio'}
+							</button>
+						{/if}
 					{/if}
 
 					<button
 						class="ml-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-gray-500 transition hover:bg-white/5 hover:text-white"
 						title="Close editor"
-						onclick={() => (ui.editingClipId = null)}
+						onclick={() => {
+							ui.editingClipId = null;
+							ui.fxClipId = null;
+						}}
 					>
 						<span class="material-symbols-rounded text-base">close</span>
 					</button>
 				</div>
 
-				{#if clip.type === 'dialogue'}
+				{#if ui.fxClipId === clip.id}
+					<!-- FX rack (opened via the clip's fx badge, any clip type) -->
+					<div class="mb-2 flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-gray-500">
+						<span class="material-symbols-rounded text-[13px] text-violet-400">tune</span>
+						<span class="truncate">
+							Effects — {clip.type === 'dialogue' ? (character?.name ?? 'Unassigned') : clip.type === 'ambience' ? 'Ambience Mix' : clip.name}
+						</span>
+					</div>
+					<div class="flex h-full min-h-0 gap-4 pb-1">
+						<!-- effect list (left): only this list scrolls, never the drawer -->
+						<div class="flex min-h-0 w-44 shrink-0 flex-col">
+							<div class="scrollbar min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
+								{#each fxList as fx (fx.id)}
+								{@const active = selectedFx?.id === fx.id}
+								<div
+									class="flex cursor-pointer items-center gap-1.5 rounded-lg border px-2 py-1 text-left transition
+										{active ? 'border-violet-500/60 bg-violet-500/10' : 'border-transparent hover:border-white/10 hover:bg-white/5'}"
+									onclick={() => {
+										selectedFxId = fx.id;
+										showAddMenu = false;
+									}}
+									title="Select to edit parameters"
+								>
+									<span class="material-symbols-rounded text-[14px] {fx.on ? 'text-cyan-300' : 'text-gray-600'}">{fxIcon(fx.name)}</span>
+									<span class="min-w-0 flex-1 truncate text-[11px] font-medium {fx.on ? 'text-gray-200' : 'text-gray-500'}">{fx.name}</span>
+									<button
+										class="flex h-5 w-5 shrink-0 items-center justify-center rounded transition
+											{fx.on ? 'text-emerald-400 hover:bg-white/10' : 'text-gray-600 hover:bg-white/10 hover:text-gray-400'}"
+										title={fx.on ? 'Bypass effect' : 'Enable effect'}
+										onclick={(e) => {
+											e.stopPropagation();
+											fx.on = !fx.on;
+										}}
+									>
+										<span class="material-symbols-rounded text-[13px]">power_settings_new</span>
+									</button>
+								</div>
+							{/each}
+								{#if fxList.length === 0}
+									<div class="rounded-lg border border-dashed border-white/15 px-2 py-3 text-center text-[10px] text-gray-500">
+										No effects — press + to add one.
+									</div>
+								{/if}
+							</div>
+							<!-- + / − toolbar (left, below the list) -->
+							<div class="mt-1.5 flex shrink-0 gap-1.5">
+								<span class="relative flex-1">
+									<button
+										class="flex h-6 w-full items-center justify-center gap-1 rounded-md bg-violet-600 text-xs font-semibold text-white transition hover:bg-violet-500"
+										title="Add effect"
+										onclick={() => (showAddMenu = !showAddMenu)}
+									>
+										<span class="material-symbols-rounded text-sm">add</span>
+									</button>
+									{#if showAddMenu}
+										<div
+											class="absolute bottom-full left-0 z-40 mb-1 max-h-48 w-44 overflow-y-auto rounded-lg border border-white/10 bg-[#202635] shadow-2xl"
+										>
+											{#each EFFECT_TYPES as t (t.name)}
+												<button
+													class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-gray-200 transition hover:bg-white/5"
+													onclick={() => addFx(t.name)}
+												>
+													<span class="material-symbols-rounded text-[15px] text-cyan-300">{t.icon}</span>
+													<span class="flex-1">{t.name}</span>
+													<span class="material-symbols-rounded text-[13px] text-gray-600">add</span>
+												</button>
+											{/each}
+										</div>
+									{/if}
+								</span>
+								<button
+									class="flex h-6 w-8 shrink-0 items-center justify-center rounded-md border border-white/10 bg-[#202635] text-gray-300 transition hover:bg-white/10 disabled:opacity-40"
+									title="Remove selected effect"
+									disabled={!selectedFx}
+									onclick={removeSelectedFx}
+								>
+									<span class="material-symbols-rounded text-sm">remove</span>
+								</button>
+							</div>
+						</div>
+						<!-- selected effect parameters -->
+						<div class="min-w-0 flex-1">
+							{#if selectedFx}
+								<div class="mb-1 text-[10px] uppercase tracking-widest text-gray-500">
+									{selectedFx.name} parameters
+								</div>
+								<div class="flex flex-wrap gap-3">
+									{#each selectedFx.params as p (p.name)}
+										<Knob
+											bind:value={p.value}
+											label={p.name}
+											size={52}
+											min={p.min}
+											max={p.max}
+											step={p.step}
+											display={formatParam(p)}
+											clickToggle={false}
+										/>
+									{/each}
+								</div>
+							{:else}
+								<div class="flex h-full items-center text-[11px] italic text-gray-600">
+									Select an effect on the left to tune its parameters.
+								</div>
+							{/if}
+						</div>
+					</div>
+				{:else if clip.type === 'dialogue'}
 					<!-- script + fish audio controls -->
 					<div class="mb-2 text-[10px] uppercase tracking-widest text-gray-500">
 						Script + Fish Audio controls
@@ -293,126 +583,60 @@
 					</div>
 				{:else if clip.type === 'ambience'}
 					<!-- AMBIENCE MIXER -->
-					<div class="mb-2 text-[10px] uppercase tracking-widest text-gray-500">
-						Ambience Mixer — drag knobs up/down, click to toggle 50%/0%
-					</div>
-
-					<!-- Available ambient layers -->
-					<div class="mb-4">
-						<div class="mb-2 text-[11px] text-cyan-300 font-medium">Ambient Layers ({clip.layers?.filter(l => l.enabled).length ?? 0} active of {clip.layers?.length ?? 0})</div>
-						<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-							{#each AUDIO_CATALOG.ambience as item (item.id)}
-								{#if clip.layers?.some(l => l.id === item.id)}
-									<!-- Already in mix - show knob -->
-									{#const layer = clip.layers.find(l => l.id === item.id)!}
-										<div class="flex flex-col items-center gap-1.5 rounded-lg border border-white/10 bg-[#1e2432] p-3 transition hover:border-cyan-500/30">
-											<span class="material-symbols-rounded text-[22px] text-cyan-300">{item.icon}</span>
-											<span class="text-center text-[10px] font-medium text-gray-200 max-w-[70px] truncate">{item.name}</span>
-											<Knob
-												bind:value={layer.volume}
-												label={item.name}
-												icon={item.icon}
-												size={56}
-												min={0}
-												max={1}
-												step={0.01}
-											/>
-										</div>
-									{/const}
-								{:else}
-									<!-- Not in mix - show add button -->
-									<button
-										class="flex flex-col items-center gap-1.5 rounded-lg border border-white/10 bg-[#0e131b] p-3 text-center text-[10px] text-gray-400 transition hover:border-cyan-500/30 hover:bg-cyan-500/5 hover:text-cyan-300"
-										onclick={() => {
-											if (!clip.layers) clip.layers = [];
-											clip.layers = [...clip.layers, {
-												id: item.id,
-												name: item.name,
-												icon: item.icon,
-												file: item.file,
-												volume: 0.5,
-												enabled: true
-											}];
-										}}
-										title="Add to mix"
-									>
-										<span class="material-symbols-rounded text-[22px] text-gray-500">{item.icon}</span>
-										<span class="text-center text-[10px] max-w-[70px] truncate">{item.name}</span>
-										<span class="material-symbols-rounded text-[16px] text-cyan-400">add_circle</span>
-									</button>
+					<!-- All layers (including muted) -->
+					{#if clip.layers && clip.layers.length > 0}
+						<div class="mb-3 flex flex-wrap gap-2">
+							{#each clip.layers as layer (layer.id)}
+								{@const catalogItem = AUDIO_CATALOG.ambience.find((item) => item.id === layer.id)}
+								{#if catalogItem}
+									<div class="group relative flex flex-col items-center gap-0.5 transition {layer.volume === 0 ? 'opacity-40' : ''}">
+										<button
+											class="absolute -right-1 -top-1 z-10 flex h-4 w-4 items-center justify-center rounded-full border border-white/10 bg-[#202635] text-gray-500 opacity-0 transition hover:border-red-500/40 hover:text-red-400 group-hover:opacity-100"
+											onclick={() => removeAmbienceLayer(layer.id)}
+											title="Remove {catalogItem.name} from the mix"
+										>
+											<span class="material-symbols-rounded text-[11px]">close</span>
+										</button>
+										<Knob
+											bind:value={layer.volume}
+											icon={catalogItem.icon}
+											size={40}
+											min={0}
+											max={1}
+											step={0.01}
+										/>
+										<button
+											class="text-center text-[8px] font-medium text-gray-300 max-w-[50px] truncate cursor-pointer hover:text-white"
+											onclick={() => layer.volume = layer.volume === 0 ? 0.5 : 0}
+											title="Click to {layer.volume === 0 ? 'unmute' : 'mute'}"
+										>{catalogItem.name}</button>
+									</div>
 								{/if}
 							{/each}
 						</div>
-					</div>
+					{:else}
+						<div class="mb-3 text-center text-[11px] text-gray-500 py-2">No layers — add from below</div>
+					{/if}
 
-					<!-- Mix controls -->
-					<div class="mt-4 rounded-lg border border-cyan-500/20 bg-cyan-500/10 p-3">
-						<div class="grid grid-cols-3 gap-3">
-							<label class="block">
-								<span class="mb-1 block text-[10px] font-semibold uppercase tracking-widest text-gray-500">Duration (s)</span>
-								<input
-									type="number"
-									min="1"
-									step="1"
-									class="w-full rounded border border-white/10 bg-[#0e131b] px-2 py-1.5 text-xs text-gray-200 outline-none focus:border-cyan-500/60"
-									value={clip.duration}
-									oninput={(e) => (clip.duration = Math.max(1, +(e.target as HTMLInputElement).value))}
-								/>
-							</label>
-							<label class="block">
-								<span class="mb-1 block text-[10px] font-semibold uppercase tracking-widest text-gray-500">Fade in (s)</span>
-								<input
-									type="number"
-									min="0"
-									step="0.1"
-									class="w-full rounded border border-white/10 bg-[#0e131b] px-2 py-1.5 text-xs text-gray-200 outline-none focus:border-cyan-500/60"
-									value={clip.fadeIn}
-									oninput={(e) => (clip.fadeIn = clampFade(+(e.target as HTMLInputElement).value, effDur / 2))}
-								/>
-							</label>
-							<label class="block">
-								<span class="mb-1 block text-[10px] font-semibold uppercase tracking-widest text-gray-500">Fade out (s)</span>
-								<input
-									type="number"
-									min="0"
-									step="0.1"
-									class="w-full rounded border border-white/10 bg-[#0e131b] px-2 py-1.5 text-xs text-gray-200 outline-none focus:border-cyan-500/60"
-									value={clip.fadeOut}
-									oninput={(e) => (clip.fadeOut = clampFade(+(e.target as HTMLInputElement).value, effDur / 2))}
-								/>
-							</label>
-						</div>
-						<div class="mt-3 flex items-center gap-2">
+					<!-- Available ambient layers to add -->
+					<div class="mb-2 text-[10px] uppercase tracking-widest text-gray-500">Add layer</div>
+					<div class="flex flex-wrap gap-1.5">
+						{#each AUDIO_CATALOG.ambience as item (item.id)}
+							{@const alreadyAdded = clip.layers?.some((l) => l.id === item.id)}
 							<button
-								class="flex items-center gap-1.5 rounded-lg border border-white/10 bg-[#202635] px-3 py-1.5 text-xs font-semibold text-gray-200 transition hover:bg-[#262b36]"
-								onclick={previewAmbienceMix}
-								disabled={previewing}
+								class="flex items-center gap-1 rounded border px-2 py-1 text-[10px] transition
+									{alreadyAdded ? 'border-white/5 bg-white/5 text-gray-600 cursor-default' : 'border-cyan-500/30 bg-cyan-500/5 text-cyan-300 hover:bg-cyan-500/15 hover:border-cyan-500/50'}"
+								onclick={() => !alreadyAdded && addAmbienceLayer(item)}
+								disabled={alreadyAdded}
+								title={alreadyAdded ? 'Already added' : 'Add to mix'}
 							>
-								<span class="material-symbols-rounded text-sm">{previewing ? 'graphic_eq' : 'play_arrow'}</span>
-								{previewing ? 'Previewing...' : 'Preview Mix'}
+								<span class="material-symbols-rounded text-[13px]">{item.icon}</span>
+								{item.name}
 							</button>
-							<button
-								class="ml-auto flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-300 transition hover:bg-red-500/20"
-								onclick={() => {
-									if (clip.layers) {
-										for (const layer of clip.layers) {
-											layer.enabled = false;
-											layer.volume = 0;
-										}
-									}
-								}}
-							>
-								<span class="material-symbols-rounded text-sm">volume_off</span>Mute All
-							</button>
-						</div>
-					</div>
-
-					<div class="mt-3 rounded-lg border border-white/10 bg-white/[0.03] p-3 text-[11px] leading-relaxed text-cyan-200/90">
-						<span class="material-symbols-rounded mr-1 align-middle text-[14px]">tune</span>
-						Click a knob to toggle 50% / 0% (mute). Drag up/down for fine control. Enable multiple layers to build a rich ambience bed.
+						{/each}
 					</div>
 				{:else}
-					<!-- sound clip -->
+					<!-- sound clip: rename + load MP3 from the computer -->
 					<div class="mb-2 text-[10px] uppercase tracking-widest text-gray-500">Sound clip</div>
 					<div class="grid max-w-md grid-cols-2 gap-3">
 						<label class="block">
@@ -425,107 +649,47 @@
 								oninput={(e) => (clip.name = (e.target as HTMLInputElement).value)}
 							/>
 						</label>
-						<label class="block">
+						<div>
 							<span class="mb-1 block text-[10px] font-semibold uppercase tracking-widest text-gray-500"
-								>Duration (s)</span
+								>Length</span
 							>
-							<input
-								type="number"
-								min="0.2"
-								step="0.1"
-								class="w-full rounded border border-white/10 bg-[#0e131b] px-2 py-1.5 text-xs text-gray-200 outline-none focus:border-cyan-500/60"
-								value={clip.duration}
-								oninput={(e) => (clip.duration = Math.max(0.2, +(e.target as HTMLInputElement).value))}
-							/>
-						</label>
+							<div class="rounded border border-white/10 bg-[#0e131b] px-2 py-1.5 text-xs text-gray-200">
+								{clip.duration.toFixed(1)}s
+								<span class="text-gray-600">· trim on the timeline</span>
+							</div>
+						</div>
 					</div>
-					<div class="mt-3 rounded-lg border border-cyan-500/20 bg-cyan-500/10 p-3 text-[11px] leading-relaxed text-cyan-200/90">
-						<span class="material-symbols-rounded mr-1 align-middle text-[14px]">music_note</span>
-						Library sound — rendered waveform, no Fish Audio synthesis needed.
+					<div class="mt-3 flex max-w-md items-center gap-2">
+						<input
+							type="file"
+							accept="audio/*,.mp3,.wav,.ogg,.m4a"
+							class="hidden"
+							bind:this={soundFileInput}
+							onchange={onSoundFilePicked}
+						/>
+						<button
+							class="flex shrink-0 items-center gap-1.5 rounded-lg bg-cyan-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-cyan-500 disabled:opacity-50"
+							disabled={importingSound}
+							onclick={() => soundFileInput?.click()}
+						>
+							<span class="material-symbols-rounded text-sm {importingSound ? 'animate-spin' : ''}">
+								{importingSound ? 'progress_activity' : 'upload'}
+							</span>
+							{importingSound ? 'Loading...' : clip.file ? 'Replace MP3' : 'Load MP3'}
+						</button>
+						<div class="min-w-0 flex-1 truncate text-[11px] text-gray-500" title={clip.file ?? ''}>
+							{clip.file
+								? (playable ? `Loaded · ${uploadDisplayName(clip.file)}` : `Cached · ${uploadDisplayName(clip.file)} — re-resolves on play`)
+								: 'No audio yet — load an MP3 from your computer'}
+						</div>
+					</div>
+					<div class="mt-2 max-w-md rounded-lg border border-white/10 bg-white/[0.03] p-2.5 text-[10.5px] leading-relaxed text-gray-500">
+						<span class="material-symbols-rounded mr-1 align-middle text-[13px] text-cyan-400/70">save</span>
+						Audio bytes live in the audio cache (IndexedDB) — the project JSON keeps only the file reference.
 					</div>
 				{/if}
 			</div>
+	</div>
 
-			<!-- right column -->
-			<div class="scrollbar w-72 shrink-0 overflow-y-auto border-l border-white/10 p-4">
-				{#if clip.type === 'dialogue'}
-					<div class="mb-2 text-[10px] uppercase tracking-widest text-gray-500">Audio Effects</div>
-					{#each clip.effects as fx (fx.name)}
-						<label class="flex cursor-pointer items-center gap-2 rounded-lg p-1.5 transition hover:bg-white/5">
-							<input type="checkbox" bind:checked={fx.on} class="accent-violet-500" />
-							<span class="flex-1 text-xs text-gray-300">{fx.name}</span>
-							<span class="text-[10px] text-gray-500">{fx.value}</span>
-						</label>
-					{/each}
-					<div class="my-3 border-t border-white/10"></div>
-				{/if}
-
-				<div class="mb-2 text-[10px] uppercase tracking-widest text-gray-500">Clip timing</div>
-				<div class="text-xs text-gray-400">
-					{#if clip.type === 'dialogue' && !clip.rendered}
-						Estimated length <b class="text-amber-400">~{estimateDuration(clip.text).toFixed(1)}s</b>
-						<span class="text-gray-600">(from text length)</span>
-					{:else}
-						Length <b class="text-gray-200">{effDur.toFixed(1)}s</b>
-						{#if clip.type === 'dialogue' && clip.rendered}
-							<span class="text-gray-600">· rendered</span>
-						{/if}
-					{/if}
-				</div>
-
-				<div class="mt-4">
-					<div class="mb-2 text-[10px] uppercase tracking-widest text-gray-500">Fades</div>
-					<div class="grid grid-cols-2 gap-3">
-						<label class="block">
-							<span class="mb-1 block text-[10px] text-gray-500">Fade in (s)</span>
-							<input
-								type="number"
-								min="0"
-								step="0.1"
-								class="w-full rounded border border-white/10 bg-[#0e131b] px-2 py-1.5 text-xs text-gray-200 outline-none focus:border-violet-500/60"
-								value={clip.fadeIn}
-								oninput={(e) => (clip.fadeIn = clampFade(+(e.target as HTMLInputElement).value, effDur / 2))}
-							/>
-						</label>
-						<label class="block">
-							<span class="mb-1 block text-[10px] text-gray-500">Fade out (s)</span>
-							<input
-								type="number"
-								min="0"
-								step="0.1"
-								class="w-full rounded border border-white/10 bg-[#0e131b] px-2 py-1.5 text-xs text-gray-200 outline-none focus:border-violet-500/60"
-								value={clip.fadeOut}
-								oninput={(e) => (clip.fadeOut = clampFade(+(e.target as HTMLInputElement).value, effDur / 2))}
-							/>
-						</label>
-					</div>
-					<p class="mt-1.5 text-[10px] leading-snug text-gray-500">
-						Tip: drag the cyan circles on a clip's top corners to fade, the amber tabs on the bottom
-						corners to cut/trim.
-					</p>
-				</div>
-			</div>
-		</div>
-
-		<!-- footer actions -->
-		<div class="flex shrink-0 justify-end gap-2 border-t border-white/10 px-4 py-2.5">
-			<button
-				class="flex items-center gap-1.5 rounded-lg border border-white/10 bg-[#202635] px-3 py-1.5 text-xs font-medium text-gray-200 transition hover:bg-[#262b36]"
-				onclick={() => duplicateClip(clip.id)}
-			>
-				<span class="material-symbols-rounded text-sm">content_copy</span>Duplicate
-			</button>
-			<button
-				class="flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-300 transition hover:bg-red-500/20"
-				onclick={() => deleteClip(clip.id)}
-			>
-				<span class="material-symbols-rounded text-sm">delete</span>Delete
-			</button>
-		</div>
-	{:else}
-		<div class="flex flex-1 items-center justify-center gap-2 text-sm text-gray-600">
-			<span class="material-symbols-rounded text-lg">touch_app</span>
-			Double-click a timeline clip to edit its text, emotion, pauses, voice, and effects.
-		</div>
-	{/if}
 </section>
+{/if}

@@ -7,7 +7,11 @@
 		min = 0,
 		max = 1,
 		step = 0.01,
-		disabled = false
+		disabled = false,
+		/** overrides the readout under the knob (e.g. '180 ms'); defaults to % */
+		display = '',
+		/** click toggles 50%/0 (volume knobs); set false for parameter knobs */
+		clickToggle = true
 	}: {
 		value: number;
 		label?: string;
@@ -17,6 +21,8 @@
 		max?: number;
 		step?: number;
 		disabled?: boolean;
+		display?: string;
+		clickToggle?: boolean;
 	} = $props();
 
 	let isDragging = $state(false);
@@ -32,6 +38,7 @@
 	const normalized = $derived(Math.max(0, Math.min(1, (value - min) / (max - min))));
 	const currentAngle = $derived(START_ANGLE + normalized * TOTAL_ANGLE);
 	const pctText = $derived(`${Math.round(normalized * 100)}%`);
+	const readout = $derived(display || pctText);
 
 	// SVG arc calculation
 	const radius = $derived((size / 2) - 8);
@@ -92,7 +99,7 @@
 		}
 
 		// If user simply clicked (didn't drag): toggle between 50% (0.50) and 0% (0.00)
-		if (!hasMoved) {
+		if (!hasMoved && clickToggle) {
 			if (value > 0.05) {
 				value = 0;
 			} else {
@@ -123,7 +130,7 @@
 		aria-valuenow={value}
 		aria-valuemin={min}
 		aria-valuemax={max}
-		title="{label || 'Volume'}: {pctText} (Click to toggle 50%/0%, drag up/down to adjust)"
+		title="{label || 'Volume'}: {readout} (drag up/down to adjust{clickToggle ? '; click to toggle 50%/0%' : ''})"
 	>
 		<svg width={size} height={size} class="overflow-visible">
 			<!-- Background track -->
@@ -177,13 +184,21 @@
 		</div>
 	</div>
 
-	<!-- Percentage value under knob -->
-	<button
-		type="button"
-		class="mt-1 cursor-pointer rounded px-1.5 py-0.5 font-mono text-[9.5px] transition {normalized > 0 ? 'bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/25' : 'bg-white/5 text-gray-500 hover:bg-white/10'}"
-		onclick={() => (value = value > 0.05 ? 0 : 0.5)}
-		title="Click to toggle 50% / 0%"
-	>
-		{pctText}
-	</button>
+	<!-- Value readout under knob -->
+	{#if clickToggle}
+		<button
+			type="button"
+			class="mt-1 cursor-pointer rounded px-1.5 py-0.5 font-mono text-[9.5px] transition {normalized > 0 ? 'bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/25' : 'bg-white/5 text-gray-500 hover:bg-white/10'}"
+			onclick={() => (value = value > 0.05 ? 0 : 0.5)}
+			title="Click to toggle 50% / 0%"
+		>
+			{readout}
+		</button>
+	{:else}
+		<span
+			class="mt-1 rounded bg-white/5 px-1.5 py-0.5 font-mono text-[9.5px] text-gray-300"
+		>
+			{readout}
+		</span>
+	{/if}
 </div>

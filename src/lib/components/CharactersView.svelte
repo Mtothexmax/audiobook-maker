@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { project, addCharacter, removeCharacter, rerollFace, charById, VOICE_PRESETS } from '$lib/project.svelte';
+	import { project, addCharacter, removeCharacter, rerollFace, removeFace, charById, VOICE_PRESETS } from '$lib/project.svelte';
 	import { EMOTIONS } from '$lib/tags';
 	import Avatar from './Avatar.svelte';
 
@@ -45,14 +45,31 @@
 						<!-- avatar + actions -->
 						<div class="flex items-start gap-4">
 							<div class="group relative">
-								<Avatar face={c.face} size={64} rounded="xl" />
-								<button
-									class="absolute -bottom-1.5 -right-1.5 flex h-6 w-6 items-center justify-center rounded-full border border-white/10 bg-[#202635] text-violet-300 opacity-0 shadow transition hover:text-white group-hover:opacity-100"
-									title="Roll a new face"
-									onclick={() => rerollFace(c.id)}
-								>
-									<span class="material-symbols-rounded text-[13px]">casino</span>
-								</button>
+								{#if c.face}
+									<Avatar face={c.face} size={64} rounded="xl" />
+									<button
+										class="absolute -bottom-1.5 -right-1.5 flex h-6 w-6 items-center justify-center rounded-full border border-white/10 bg-[#202635] text-violet-300 opacity-0 shadow transition hover:text-white group-hover:opacity-100"
+										title="Roll a new face"
+										onclick={() => rerollFace(c.id)}
+									>
+										<span class="material-symbols-rounded text-[13px]">casino</span>
+									</button>
+									<button
+										class="absolute -right-1.5 -top-1.5 flex h-6 w-6 items-center justify-center rounded-full border border-white/10 bg-[#202635] text-gray-500 opacity-0 shadow transition hover:text-red-400 group-hover:opacity-100"
+										title="Delete avatar"
+										onclick={() => removeFace(c.id)}
+									>
+										<span class="material-symbols-rounded text-[13px]">close</span>
+									</button>
+								{:else}
+									<button
+										class="flex h-16 w-16 items-center justify-center rounded-xl bg-white/5 text-lg font-bold text-gray-500 ring-1 ring-white/10 transition hover:bg-white/10 hover:text-gray-300"
+										title="Add an avatar"
+										onclick={() => rerollFace(c.id)}
+									>
+										{c.name.trim().charAt(0).toUpperCase() || '?'}
+									</button>
+								{/if}
 							</div>
 
 							<div class="min-w-0 flex-1">

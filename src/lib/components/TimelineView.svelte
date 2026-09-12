@@ -6,24 +6,29 @@
 		resetPlayhead,
 		seek,
 		totalDuration,
-		SOUND_PRESETS,
 		SOUND_CATEGORIES,
 		addCharacter,
-		addSoundClip,
-		addCategoryClip,
-		trackOfClip,
-		settings,
 		renderAllClips,
 		stopPlay,
 		clipHasAudio,
+		deleteClip,
 		type SoundCategory
 	} from '$lib/project.svelte';
 	import { onDestroy } from 'svelte';
+	import { browser } from '$app/environment';
 	import Avatar from './Avatar.svelte';
 	import Lane from './Lane.svelte';
+	import { addTrack } from '$lib/project.svelte';
 	import EditorPanel from './EditorPanel.svelte';
 
 	onDestroy(() => stopPlay());
+
+	onDestroy(() => {
+		// onDestroy also runs during SSR — never touch window there.
+		if (!browser) return;
+		window.removeEventListener('mousemove', onPanMove);
+		window.removeEventListener('mouseup', onPanUp);
+	});
 
 	let renderingAll = $state(false);
 	async function renderAll() {
@@ -71,42 +76,107 @@
 		return 30;
 	}
 
-	function renderedStats(): { done: number; total: number; pct: number } {
-		let total = 0;
-		let done = 0;
-		for (const t of project.tracks) {
-			for (const c of t.clips) {
-				total++;
-				if (c.type === 'sound' || clipHasAudio(c.id)) done++;
-			}
-		}
-		return { done, total, pct: total ? Math.round((done / total) * 100) : 0 };
-	}
-
 	function onSeek(e: MouseEvent) {
 		const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
 		seek(Math.max(0, (e.clientX - rect.left) / ui.zoom));
 	}
 
-	/* drag a sound preset (HTML5 DnD) onto any lane */
-	function onPresetDragStart(e: DragEvent, name: string) {
-		const preset = SOUND_PRESETS.find((p) => p.name === name);
-		if (!preset || !e.dataTransfer) return;
-		e.dataTransfer.setData('application/x-sound-preset', JSON.stringify(preset));
+	/* drag-to-pan the timeline (grab empty space to scroll left/right) */
+	let panning = $state(false);
+	let suppressPanClick = false;
+	const pan = { active: false, x: 0, y: 0, left: 0, top: 0, el: null as HTMLElement | null };
+
+	function onPanDown(e: MouseEvent) {
+		if (e.button !== 0) return;
+		const t = e.target as HTMLElement;
+		// Clips, controls and the ruler keep their own gestures — pan everywhere else.
+		if (t.closest('[data-clip-id], button, input, select, textarea, a, [data-ruler]')) return;
+		const el = e.currentTarget as HTMLElement;
+		pan.active = true;
+		pan.x = e.clientX;
+		pan.y = e.clientY;
+		pan.left = el.scrollLeft;
+		pan.top = el.scrollTop;
+		pan.el = el;
+		e.preventDefault();
+		window.addEventListener('mousemove', onPanMove);
+		window.addEventListener('mouseup', onPanUp);
+	}
+
+	function onPanMove(e: MouseEvent) {
+		if (!pan.active || !pan.el) return;
+		const dx = e.clientX - pan.x;
+		const dy = e.clientY - pan.y;
+		if (!panning && Math.hypot(dx, dy) > 4) panning = true;
+		if (!panning) return;
+		pan.el.scrollLeft = pan.left - dx;
+		pan.el.scrollTop = pan.top - dy;
+	}
+
+	function onPanUp() {
+		window.removeEventListener('mousemove', onPanMove);
+		window.removeEventListener('mouseup', onPanUp);
+		if (panning) suppressPanClick = true;
+		pan.active = false;
+		pan.el = null;
+		panning = false;
+	}
+
+	/* Swallow the ruler seek click when a pan gesture just ended on it. */
+	function onPanClickCapture(e: MouseEvent) {
+		if (!suppressPanClick) return;
+		suppressPanClick = false;
+		e.stopPropagation();
+		e.preventDefault();
+	}
+
+	/* mousewheel zoom (zoom at cursor; Shift+wheel keeps native horizontal scroll) */
+	function onWheel(e: WheelEvent) {
+		if (e.shiftKey) return;
+		e.preventDefault();
+		const el = e.currentTarget as HTMLElement;
+		const rect = el.getBoundingClientRect();
+		const cursorX = e.clientX - rect.left;
+		const timeAtCursor = Math.max(0, (cursorX + el.scrollLeft - GUTTER) / ui.zoom);
+		const factor = e.deltaY > 0 ? 1 / 1.15 : 1.15;
+		const next = Math.max(20, Math.min(240, Math.round(ui.zoom * factor)));
+		if (next === ui.zoom) return;
+		ui.zoom = next;
+		const targetLeft = Math.max(0, timeAtCursor * next + GUTTER - cursorX);
+		requestAnimationFrame(() => {
+			el.scrollLeft = targetLeft;
+		});
+	}
+
+	/* keyboard shortcuts (window-level so they work regardless of focus) */
+	function onKeyDown(e: KeyboardEvent) {
+		if (ui.tab !== 'timeline') return;
+		const tag = (e.target as HTMLElement)?.tagName ?? '';
+		if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return;
+		// Space to play from the time marker / pause at the time marker
+		// (but not on key-repeat).
+		if (e.code === 'Space' && !e.repeat) {
+			e.preventDefault();
+			void togglePlay();
+		}
+		// Delete/Backspace to delete selected clip
+		if ((e.code === 'Delete' || e.code === 'Backspace') && ui.selectedClipId) {
+			e.preventDefault();
+			deleteClip(ui.selectedClipId);
+			ui.selectedClipId = null;
+			ui.editingClipId = null;
+			ui.fxClipId = null;
+		}
+	}
+
+	/* drag a category onto any lane (clicking does nothing — drag & drop only) */
+	function onCategoryDragStart(e: DragEvent, category: SoundCategory) {
+		if (!e.dataTransfer) return;
+		e.dataTransfer.setData('application/x-sound-category', JSON.stringify(category));
 		if (e.dataTransfer) e.dataTransfer.effectAllowed = 'copy';
 	}
 
-	/* click a preset: add it to the lane of the selected clip (or first lane) */
-	function addPresetClick(presetName: string) {
-		const preset = SOUND_PRESETS.find((p) => p.name === presetName);
-		if (!preset) return;
-		const targetTrack =
-			(ui.selectedClipId ? trackOfClip(ui.selectedClipId) : undefined) ?? project.tracks[0];
-		if (!targetTrack) return;
-		addSoundClip(targetTrack.id, preset);
-	}
-
-	const GUTTER = 160;
+	const GUTTER = 32;
 
 	const total = $derived(totalDuration());
 	const step = $derived(rulerStep(ui.zoom));
@@ -115,8 +185,9 @@
 		for (let t = 0; t <= total; t += step) arr.push(t);
 		return arr;
 	}
-	const stats = $derived(renderedStats());
 </script>
+
+<svelte:window onkeydown={onKeyDown} />
 
 <div class="flex h-full min-h-0 flex-col">
 	<!-- transport + zoom toolbar -->
@@ -153,7 +224,7 @@
 				<span class="material-symbols-rounded text-sm {renderingAll ? 'animate-spin' : ''}">
 					{renderingAll ? 'progress_activity' : 'graphic_eq'}
 				</span>
-				{renderingAll ? 'Rendering...' : `Render all${missingAudio ? ` (${missingAudio})` : ''}`}
+				{renderingAll ? 'Rendering...' : `Render missing${missingAudio ? ` (${missingAudio})` : ''}`}
 			</button>
 			<button
 				class="flex h-8 w-8 items-center justify-center rounded text-gray-400 hover:bg-white/5 hover:text-white"
@@ -185,33 +256,27 @@
 	<div class="flex min-h-0 flex-1">
 		<!-- sidebar: cast + sound library -->
 		<aside class="flex w-64 shrink-0 flex-col border-r border-white/10 bg-[#111620]">
-			<div class="flex items-center justify-between border-b border-white/10 p-3">
-				<div>
-					<div class="text-[10px] uppercase tracking-widest text-gray-500">Cast</div>
-					<div class="text-sm font-semibold text-gray-100">Characters</div>
-				</div>
-				<button
-					class="flex h-7 w-7 items-center justify-center rounded-lg bg-white/5 text-gray-300 transition hover:bg-white/10"
-					title="Add character"
-					onclick={() => {
-						const c = addCharacter();
-						ui.selectedCharacterId = c.id;
-					}}
-				>
-					<span class="material-symbols-rounded text-base">add</span>
-				</button>
+			<div class="p-3">
+				<div class="text-[10px] uppercase tracking-widest text-gray-500">Characters</div>
 			</div>
 
 			<div class="scrollbar max-h-[38%] overflow-y-auto p-2">
 				{#each project.characters as c (c.id)}
 					<button
 						class="mb-1 flex w-full items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition
-							{ui.selectedCharacterId === c.id
-								? 'border-violet-500/60 bg-violet-500/10'
-								: 'border-transparent hover:border-white/10 hover:bg-white/5'}"
+						{ui.selectedCharacterId === c.id
+							? 'border-violet-500/60 bg-violet-500/10'
+							: 'border-transparent hover:border-white/10 hover:bg-white/5'}"
 						onclick={() => (ui.selectedCharacterId = c.id)}
 					>
-						<Avatar face={c.face} size={32} />
+						{#if c.face}
+							<Avatar face={c.face} size={32} />
+						{:else}
+							<span
+								class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/5 text-xs font-bold text-gray-500 ring-1 ring-white/10"
+								>{c.name.trim().charAt(0).toUpperCase() || '?'}</span
+							>
+						{/if}
 						<div class="min-w-0 flex-1">
 							<div class="truncate text-xs font-medium text-gray-200">{c.name}</div>
 							<div class="truncate font-mono text-[10px] text-gray-500">{c.voiceId}</div>
@@ -229,73 +294,55 @@
 				{/if}
 			</div>
 
-			<!-- sound library: draggable onto ANY lane -->
+			<!-- sound library: 3 categories draggable onto ANY lane -->
 			<div class="border-y border-white/10 p-3">
-				<div class="mb-1 text-[10px] uppercase tracking-widest text-gray-500">Sound library</div>
-				<div class="mb-2 text-[10px] leading-snug text-gray-600">
-					Drag onto <b class="text-gray-500">any lane</b> — lanes are not type-specific.
-				</div>
-				<div class="scrollbar max-h-40 space-y-0.5 overflow-y-auto pr-1">
-					{#each SOUND_PRESETS as p (p.name)}
+				<div class="text-[10px] uppercase tracking-widest text-gray-500">Sound library</div>
+				<div class="scrollbar max-h-48 space-y-1.5 overflow-y-auto pr-1">
+					{#each SOUND_CATEGORIES as cat (cat.id)}
 						<div
-							class="group flex cursor-grab items-center gap-2 rounded-lg border border-transparent px-2 py-1.5 transition hover:border-cyan-400/30 hover:bg-cyan-500/5 active:cursor-grabbing"
+							class="group flex cursor-grab items-center gap-2.5 rounded-lg border border-transparent px-3 py-2 transition hover:border-cyan-400/30 hover:bg-cyan-500/5 active:cursor-grabbing"
 							draggable="true"
-							ondragstart={(e) => onPresetDragStart(e, p.name)}
-							onclick={() => addPresetClick(p.name)}
-							title="Drag onto a lane, or click to add to the selected lane"
+							ondragstart={(e) => onCategoryDragStart(e, cat.id)}
+							title="Drag onto a lane to add"
 						>
-							<span class="material-symbols-rounded text-[15px] text-cyan-300">{p.icon}</span>
-							<span class="min-w-0 flex-1 truncate text-[11px] text-gray-300">{p.name}</span>
-							<span class="text-[10px] text-gray-600">{p.duration}s</span>
+							<div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-cyan-500/15 border border-cyan-500/30">
+								<span class="material-symbols-rounded text-[16px] text-cyan-300">{cat.icon}</span>
+							</div>
+							<div class="min-w-0 flex-1">
+								<div class="truncate text-[11px] font-semibold text-gray-200">{cat.name}</div>
+								<div class="truncate text-[10px] text-gray-500">{cat.description}</div>
+							</div>
 							<span class="material-symbols-rounded text-sm text-gray-600 opacity-0 transition group-hover:opacity-100">drag_indicator</span>
 						</div>
 					{/each}
 				</div>
 			</div>
-
-			<!-- footer status -->
-			<div class="mt-auto space-y-1.5 border-t border-white/10 p-3 text-[11px] text-gray-500">
-				<div class="flex justify-between">
-					<span>Voice engine</span>
-					<b class="text-gray-300">Fish Audio</b>
-				</div>
-				<div class="flex justify-between">
-					<span>Rendered</span>
-					<b class="text-emerald-400">{stats.pct}%</b>
-				</div>
-				<button
-					class="flex w-full items-center justify-between rounded-lg border border-white/10 bg-white/[0.03] px-2 py-1.5 transition hover:bg-white/5"
-					onclick={() => (ui.settingsOpen = true)}
-					title="Open settings"
-				>
-					<span class="flex items-center gap-1.5">
-						<span class="material-symbols-rounded text-[14px]">key</span>
-						API key
-					</span>
-					<span
-						class="flex items-center gap-1 {settings.fishAudioApiKey ? 'text-emerald-400' : 'text-amber-400/90'}"
-					>
-						<span class="material-symbols-rounded text-[12px]">
-							{settings.fishAudioApiKey ? 'check_circle' : 'error_outline'}
-						</span>
-						{settings.fishAudioApiKey ? 'configured' : 'not set'}
-					</span>
-				</button>
-			</div>
 		</aside>
 
 		<!-- timeline -->
-		<div class="scrollbar min-w-0 flex-1 overflow-auto bg-[#0d121a]">
+		<div
+			class="scrollbar min-w-0 flex-1 overflow-auto bg-[#0d121a] {panning ? 'cursor-grabbing select-none' : 'cursor-grab'}"
+			onwheel={onWheel}
+			onmousedown={onPanDown}
+			onclickcapture={onPanClickCapture}
+		>
 			<div class="relative" style="width: {GUTTER + total * ui.zoom}px">
 				<!-- ruler -->
 				<div class="sticky top-0 z-30 flex w-full">
 					<div
-						class="sticky left-0 z-40 flex w-40 shrink-0 items-center border-b border-r border-white/10 bg-[#111620] px-3 text-[10px] font-semibold uppercase tracking-wider text-gray-500"
+						class="sticky left-0 z-40 flex w-8 shrink-0 items-center justify-center border-b border-r border-white/10 bg-[#111620] px-1"
 					>
-						Timeline
+						<button
+							class="flex h-6 w-6 items-center justify-center rounded bg-white/10 text-gray-400 transition hover:bg-white/20 hover:text-white"
+							title="Add new lane"
+							onclick={() => addTrack()}
+						>
+							<span class="material-symbols-rounded text-sm">add</span>
+						</button>
 					</div>
 					<div
 						class="relative h-7 flex-1 cursor-text border-b border-white/10 bg-[#111620]"
+						data-ruler
 						onclick={onSeek}
 					>
 						{#each ticks() as t (t)}
@@ -325,26 +372,4 @@
 
 	<!-- clip editor (bottom, ChatGPT-style) -->
 	<EditorPanel />
-
-	<!-- hint bar -->
-	<div
-		class="flex h-8 shrink-0 items-center gap-4 border-t border-white/10 bg-[#111620] px-4 text-[10.5px] text-gray-500"
-	>
-		<span class="flex items-center gap-1">
-			<span class="material-symbols-rounded text-[13px] text-amber-400">drag_handle</span>
-			Drag bottom handles to cut
-		</span>
-		<span class="flex items-center gap-1">
-			<span class="material-symbols-rounded text-[13px] text-cyan-400">radio_button_unchecked</span>
-			Drag top handles to fade
-		</span>
-		<span class="flex items-center gap-1">
-			<span class="material-symbols-rounded text-[13px]">touch_app</span>
-			Double-click a clip to edit
-		</span>
-		<span class="ml-auto hidden items-center gap-1 sm:flex">
-			<span class="material-symbols-rounded text-[13px] text-violet-400">sell</span>
-			[emotion:x] / [pause:x] directives are sent to Fish Audio
-		</span>
-	</div>
 </div>

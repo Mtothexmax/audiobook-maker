@@ -3,10 +3,11 @@ import { generate } from 'facesjs';
 import type { FaceConfig } from 'facesjs';
 import type {
 	AmbienceClip,
-	AmbienceLayer,
+	AudioEffect,
 	Character,
 	Clip,
 	DialogueClip,
+	EffectParam,
 	Project,
 	SoundClip,
 	Track,
@@ -23,6 +24,14 @@ import {
 	setBuffer,
 	clearBuffer,
 	loadAudioBuffer,
+	renderAmbienceMixdown,
+	cacheRenderedAudio,
+	loadCachedRender,
+	deleteCachedRender,
+	measureLoudnessDb,
+	decodeAudioBytes,
+	saveUploadedAudio,
+	loadUploadedAudio,
 	startPlayback,
 	stopPlayback,
 	resumeContext,
@@ -122,13 +131,100 @@ export const SOUND_PRESETS: SoundPreset[] = [
 	{ name: 'Crowd Murmur', icon: 'groups', duration: 5 }
 ];
 
-export const EFFECT_PRESETS = [
-	{ name: 'Echo', on: true, value: '18%' },
-	{ name: 'Delay', on: false, value: '240 ms' },
-	{ name: 'Pitch', on: false, value: '+0.0 st' },
-	{ name: 'Reverb', on: true, value: '12%' },
-	{ name: 'Compressor', on: false, value: '-3 dB' }
+/* ------------------------------------------------------------------ */
+/* Effect types — FL-style rack: each type owns tunable knob parameters */
+/* ------------------------------------------------------------------ */
+
+export interface EffectTypeDef {
+	name: string;
+	icon: string;
+	defaultOn: boolean;
+	makeParams: () => EffectParam[];
+}
+
+function P(name: string, value: number, min: number, max: number, step: number, unit: string): EffectParam {
+	return { name, value, min, max, step, unit };
+}
+
+export const EFFECT_TYPES: EffectTypeDef[] = [
+	{
+		name: 'Echo',
+		icon: 'repeat',
+		defaultOn: true,
+		makeParams: () => [
+			P('Time', 180, 0, 1000, 1, ' ms'),
+			P('Feedback', 35, 0, 95, 1, '%'),
+			P('Mix', 18, 0, 100, 1, '%'),
+			P('Pan', 0, -100, 100, 1, '%')
+		]
+	},
+	{
+		name: 'Delay',
+		icon: 'timer',
+		defaultOn: false,
+		makeParams: () => [
+			P('Time', 240, 0, 2000, 1, ' ms'),
+			P('Feedback', 30, 0, 95, 1, '%'),
+			P('Mix', 25, 0, 100, 1, '%'),
+			P('Pan', 0, -100, 100, 1, '%')
+		]
+	},
+	{
+		name: 'Pitch',
+		icon: 'height',
+		defaultOn: false,
+		makeParams: () => [
+			P('Shift', 0, -12, 12, 0.5, ' st'),
+			P('Mix', 100, 0, 100, 1, '%'),
+			P('Pan', 0, -100, 100, 1, '%')
+		]
+	},
+	{
+		name: 'Reverb',
+		icon: 'waves',
+		defaultOn: true,
+		makeParams: () => [
+			P('Room', 40, 0, 100, 1, '%'),
+			P('Decay', 1.2, 0, 10, 0.1, ' s'),
+			P('Mix', 12, 0, 100, 1, '%'),
+			P('Pan', 0, -100, 100, 1, '%')
+		]
+	},
+	{
+		name: 'Compressor',
+		icon: 'compress',
+		defaultOn: false,
+		makeParams: () => [
+			P('Threshold', -18, -60, 0, 1, ' dB'),
+			P('Ratio', 4, 1, 20, 0.5, ':1'),
+			P('Gain', 3, 0, 24, 0.5, ' dB'),
+			P('Pan', 0, -100, 100, 1, '%')
+		]
+	},
+	{
+		name: 'Loudness',
+		icon: 'equalizer',
+		defaultOn: false,
+		makeParams: () => [P('Gain', 0, -24, 24, 0.5, ' dB'), P('Pan', 0, -100, 100, 1, '%')]
+	}
 ];
+
+/** Fresh default rack for a new clip (same defaults as the legacy presets). */
+export function defaultEffects(): AudioEffect[] {
+	return EFFECT_TYPES.map((t) => ({
+		id: nextId('fx'),
+		name: t.name,
+		on: t.defaultOn,
+		params: t.makeParams()
+	}));
+}
+
+/** Default params for an effect type; unknown names get a generic Amount knob. */
+export function makeEffectParams(name: string): EffectParam[] {
+	const def = EFFECT_TYPES.find((t) => t.name === name);
+	if (def) return def.makeParams();
+	return [P('Amount', 50, 0, 100, 1, '%')];
+}
 
 const PALETTE = [
 	'#8b5cf6',
@@ -172,7 +268,8 @@ function makeCharacter(
 		voicePreset,
 		color,
 		emotion,
-		face: generate(undefined, gender ? { gender } : undefined)
+		// No avatar by default — the user adds one explicitly (saves JSON space).
+		face: undefined
 	};
 }
 
@@ -197,7 +294,7 @@ function makeDialogue(
 		duration: rendered ? (opts.duration ?? estimateDuration(text)) : null,
 		waveform: rendered ? genWaveform(id, 64) : [],
 		renderError: null,
-		effects: EFFECT_PRESETS.map((e) => ({ ...e }))
+		effects: defaultEffects()
 	};
 }
 
@@ -220,7 +317,8 @@ function makeSound(
 		fadeOut: opts.fadeOut ?? 0,
 		rendered: true,
 		rendering: false,
-		waveform: genWaveform(id, 64)
+		waveform: genWaveform(id, 64),
+		effects: defaultEffects()
 	};
 }
 
@@ -229,37 +327,24 @@ export function makeAmbience(
 	name: string,
 	duration: number,
 	start: number,
-	initialActiveIds: string[] = ['ambience-cabin-rain-cabin'],
 	opts: Partial<Pick<AmbienceClip, 'fadeIn' | 'fadeOut'>> = {}
 ): AmbienceClip {
-	const allLayers: AmbienceLayer[] = (audioCatalog.ambience || []).map((item) => {
-		const isInitial = initialActiveIds.includes(item.id);
-		return {
-			id: item.id,
-			name: item.name,
-			icon: item.icon,
-			file: item.file,
-			volume: isInitial ? 0.5 : 0,
-			enabled: isInitial
-		};
-	});
-
-	// Use the first active layer's icon, or the first layer's icon as fallback
-	const primaryIcon = allLayers.find(l => l.enabled)?.icon || allLayers[0]?.icon || 'filter_drama';
-
 	return {
 		id,
 		type: 'ambience',
 		name,
-		icon: primaryIcon,
+		icon: 'filter_drama',
 		duration,
 		start,
 		fadeIn: opts.fadeIn ?? 1.5,
 		fadeOut: opts.fadeOut ?? 2.0,
-		rendered: true,
+		// No mixdown exists yet — user presses Regenerate to render the
+		// visible-length mix from the enabled layers.
+		rendered: false,
 		rendering: false,
-		waveform: genWaveform(id, 64),
-		layers: allLayers
+		waveform: [],
+		layers: [],
+		effects: defaultEffects()
 	};
 }
 
@@ -303,10 +388,7 @@ function initialProject(): Project {
 		name: 'Music & Ambience',
 		muted: false,
 		clips: [
-			makeAmbience('a1', 'Rainy Night Atmosphere', 28, 0, [
-				'ambience-cabin-rain-cabin',
-				'ambience-autumn-wind-air'
-			], { fadeIn: 1.5, fadeOut: 2.5 }),
+			makeAmbience('a1', 'Rainy Night Atmosphere', 28, 0, { fadeIn: 1.5, fadeOut: 2.5 }),
 			makeDialogue('d5', mara.id, '[emotion:excited] Listen — the rain is letting up!', 13.5, {
 				fadeIn: 0.2,
 				fadeOut: 0.2
@@ -329,7 +411,148 @@ function initialProject(): Project {
 	};
 }
 
-export const project = $state<Project>(initialProject());
+/* ------------------------------------------------------------------ */
+/* Persistence — project JSON in localStorage (rendered audio excluded)  */
+/* Audio buffers live in audio.ts (memory + IndexedDB), never inside     */
+/* `project`, so JSON.stringify(project) is audio-free by construction.  */
+/* Waveform peak arrays are kept so the timeline still draws after reload*/
+/* (clips simply need a re-render before playback).                      */
+/* ------------------------------------------------------------------ */
+
+const PROJECT_KEY = 'audioboook-maker:project';
+const PROJECT_VERSION = 1;
+
+function isValidProject(data: unknown): data is Project {
+	if (!data || typeof data !== 'object') return false;
+	const p = data as Record<string, unknown>;
+	return (
+		typeof p.name === 'string' &&
+		Array.isArray(p.characters) &&
+		Array.isArray(p.tracks) &&
+		(p.tracks as unknown[]).every(
+			(t) =>
+				!!t &&
+				typeof t === 'object' &&
+				typeof (t as Track).id === 'string' &&
+				Array.isArray((t as Track).clips)
+		)
+	);
+}
+
+/**
+ * FX list for any clip type. Lazily backfills defaults onto clips stored
+ * before effects existed (or hand-built ones), so badge + menu always work.
+ */
+export function clipEffects(clip: Clip): AudioEffect[] {
+	const c = clip as Clip & { effects?: unknown };
+	if (!Array.isArray(c.effects)) {
+		c.effects = defaultEffects();
+		return c.effects as AudioEffect[];
+	}
+	// Migrate legacy {name, on, value} entries and entries missing ids/params.
+	let dirty = false;
+	const migrated = (c.effects as unknown[]).map((raw) => {
+		const r = (raw ?? {}) as { id?: unknown; name?: unknown; on?: unknown; params?: unknown };
+		if (typeof r.id === 'string' && typeof r.name === 'string' && Array.isArray(r.params)) {
+			return raw as AudioEffect;
+		}
+		dirty = true;
+		const name = typeof r.name === 'string' && r.name ? r.name : 'Echo';
+		return { id: nextId('fx'), name, on: !!r.on, params: makeEffectParams(name) };
+	});
+	if (dirty) c.effects = migrated;
+	// Merge in params added to a type after the clip was stored (e.g. Pan),
+	// keeping the user's tuned values untouched.
+	const list = c.effects as AudioEffect[];
+	for (const fx of list) {
+		const def = EFFECT_TYPES.find((t) => t.name === fx.name);
+		if (!def || !Array.isArray(fx.params)) continue;
+		const have = new Set(fx.params.map((p) => p.name));
+		for (const p of def.makeParams()) {
+			if (!have.has(p.name)) {
+				fx.params.push(p);
+				have.add(p.name);
+			}
+		}
+	}
+	return list;
+}
+
+/** Backfill fields added after some projects were saved (effects, ambience layers/icon). */
+function normalizeProject(p: Project) {
+	for (const t of p.tracks) {
+		for (const c of t.clips) {
+			clipEffects(c);
+			if (!Array.isArray(c.waveform)) c.waveform = [];
+			if (c.type === 'ambience') {
+				if (!Array.isArray(c.layers)) c.layers = [];
+				if (typeof c.icon !== 'string' || !c.icon) c.icon = 'filter_drama';
+			}
+		}
+	}
+}
+
+/** Bump the id counter past any restored ids (e.g. "clip-123") to avoid collisions. */
+function syncIdCounter(p: Project) {
+	let max = 100;
+	const scan = (id: unknown) => {
+		if (typeof id !== 'string') return;
+		const m = /-(\d+)$/.exec(id);
+		if (m) max = Math.max(max, parseInt(m[1], 10));
+	};
+	for (const c of p.characters) scan(c.id);
+	for (const t of p.tracks) {
+		scan(t.id);
+		for (const clip of t.clips) scan(clip.id);
+	}
+	idCounter = max + 1;
+}
+
+function loadProject(): Project {
+	if (typeof localStorage === 'undefined') return initialProject();
+	try {
+		const raw = localStorage.getItem(PROJECT_KEY);
+		if (!raw) return initialProject();
+		const parsed: unknown = JSON.parse(raw);
+		// Accept our {version, project} envelope as well as a bare project.
+		const envelope = parsed as { version?: unknown; project?: unknown };
+		const data: unknown =
+			envelope && typeof envelope === 'object' && 'project' in envelope
+				? envelope.version !== undefined && envelope.version !== PROJECT_VERSION
+					? null
+					: envelope.project
+				: parsed;
+		if (!isValidProject(data)) return initialProject();
+		normalizeProject(data);
+		syncIdCounter(data);
+		return data;
+	} catch {
+		return initialProject();
+	}
+}
+
+export const project = $state<Project>(loadProject());
+
+/** Write the project JSON to localStorage immediately. */
+export function saveProjectNow(): void {
+	if (typeof localStorage === 'undefined') return;
+	try {
+		localStorage.setItem(PROJECT_KEY, JSON.stringify({ version: PROJECT_VERSION, project }));
+	} catch {
+		/* quota exceeded or private browsing — ignore */
+	}
+}
+
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+/** Debounced autosave — safe to call on every reactive change. */
+export function persistProjectSoon(): void {
+	if (typeof localStorage === 'undefined') return;
+	if (saveTimer) clearTimeout(saveTimer);
+	saveTimer = setTimeout(() => {
+		saveTimer = null;
+		saveProjectNow();
+	}, 500);
+}
 
 export const ui = $state({
 	tab: 'timeline' as 'timeline' | 'characters' | 'export',
@@ -339,6 +562,8 @@ export const ui = $state({
 	playing: false,
 	selectedClipId: null as string | null,
 	editingClipId: null as string | null,
+	/** when set to the editing clip's id, the bottom drawer shows its FX menu */
+	fxClipId: null as string | null,
 	selectedCharacterId: null as string | null,
 	settingsOpen: false
 });
@@ -518,15 +743,24 @@ export function rerollFace(id: string) {
 	toast(`New face for ${c.name}`);
 }
 
+/** Delete a character's avatar icon (also drops it from the export JSON). */
+export function removeFace(id: string) {
+	const c = charById(id);
+	if (!c) return;
+	c.face = undefined;
+	toast(`Avatar removed for ${c.name}`);
+}
+
 export function addTrack(): Track {
+	const trackNumber = project.tracks.length + 1;
 	const t: Track = {
 		id: nextId('track'),
-		name: 'New Lane',
+		name: '',
 		muted: false,
 		clips: []
 	};
 	project.tracks.push(t);
-	toast('Lane added — drop any clip or sound on it');
+	toast(`Lane ${trackNumber} added — drop any clip or sound on it`);
 	return t;
 }
 
@@ -616,6 +850,7 @@ export function moveClipToTrack(clipId: string, newTrackId: string) {
 export function deleteClip(clipId: string) {
 	clearBuffer(clipId);
 	markGone(clipId);
+	void deleteCachedRender(clipId);
 	for (const t of project.tracks) {
 		const idx = t.clips.findIndex((c) => c.id === clipId);
 		if (idx >= 0) {
@@ -624,6 +859,7 @@ export function deleteClip(clipId: string) {
 		}
 	}
 	if (ui.editingClipId === clipId) ui.editingClipId = null;
+	if (ui.fxClipId === clipId) ui.fxClipId = null;
 	if (ui.selectedClipId === clipId) ui.selectedClipId = null;
 }
 
@@ -631,18 +867,24 @@ export function duplicateClip(clipId: string) {
 	const track = trackOfClip(clipId);
 	const clip = clipById(clipId);
 	if (!track || !clip) return;
-	const copy = structuredClone(clip);
+	// NB: clips are $state deep proxies — structuredClone cannot clone those,
+	// $state.snapshot takes a proper plain-data deep copy instead.
+	const copy = $state.snapshot(clip);
 	copy.id = nextId('clip');
 	copy.start = snap(clip.start + effectiveDuration(clip) + 0.2);
 	// A copy starts unrendered: its audio buffer belongs to the source clip.
 	copy.rendered = false;
 	copy.rendering = false;
-	copy.duration = null;
 	copy.waveform = [];
-	if (copy.type === 'dialogue') copy.renderError = null;
+	if (copy.type === 'dialogue') {
+		copy.duration = null;
+		copy.renderError = null;
+	}
+	// sound/ambience keep their numeric duration; ambience keeps its layers
 	track.clips.push(copy);
 	ui.selectedClipId = copy.id;
 	ui.editingClipId = copy.id;
+	toast('Clip duplicated');
 }
 
 /** Render a dialogue clip with Fish Audio and decode it for playback. */
@@ -688,6 +930,7 @@ export async function regenerateClip(clipId: string): Promise<void> {
 
 		setBuffer(clip.id, buffer);
 		markReady(clip.id);
+		void cacheRenderedAudio(clip.id, buffer);
 		clip.duration = +buffer.duration.toFixed(2);
 		clip.waveform = computePeaks(buffer, 96);
 		clip.rendered = true;
@@ -703,6 +946,47 @@ export async function regenerateClip(clipId: string): Promise<void> {
 }
 
 /**
+ * Render an ambience clip by offline-mixing its enabled layers (at their knob
+ * volumes, looped) into a single buffer of exactly the visible clip length.
+ * The timeline waveform is derived from that real mix — no fake data.
+ */
+export async function renderAmbienceClip(clipId: string): Promise<void> {
+	const clip = clipById(clipId);
+	if (!clip || clip.type !== 'ambience' || clip.rendering) return;
+
+	const active = (clip.layers || []).filter((l) => l.enabled && l.volume > 0.01);
+	if (!active.length) {
+		toast('Enable at least one layer with volume > 0 first');
+		return;
+	}
+
+	clip.rendering = true;
+	toast('Rendering ambience mix...');
+	try {
+		await resumeContext();
+		const { ensureContext } = await import('./audio');
+		const sampleRate = ensureContext().sampleRate || 44100;
+		const parts = [];
+		for (const layer of active) {
+			const buffer = await loadAudioBuffer(layer.file);
+			parts.push({ buffer, gain: layer.volume });
+		}
+		const mixed = await renderAmbienceMixdown(parts, clip.duration, sampleRate);
+		setBuffer(clip.id, mixed);
+		markReady(clip.id);
+		void cacheRenderedAudio(clip.id, mixed);
+		clip.waveform = computePeaks(mixed, 96);
+		clip.rendered = true;
+		toast(`Ambience mix rendered (${clip.duration.toFixed(1)}s)`);
+	} catch (e) {
+		const message = e instanceof Error ? e.message : 'Render failed';
+		toast(`Ambience render failed: ${message}`);
+	} finally {
+		clip.rendering = false;
+	}
+}
+
+/**
  * Edited text or a new voice makes the rendered audio stale — drop it so the
  * timeline never plays audio that no longer matches the script.
  */
@@ -712,6 +996,7 @@ export function invalidateRender(clipId: string) {
 	if (!clip.rendered && !hasAudio(clip.id)) return;
 	clearBuffer(clip.id);
 	markGone(clip.id);
+	void deleteCachedRender(clip.id);
 	clip.rendered = false;
 	clip.duration = null;
 	clip.waveform = [];
@@ -737,6 +1022,147 @@ export async function renderAllClips(): Promise<void> {
 	}
 }
 
+/**
+ * Linear playback gain from a clip's Loudness FX (dB → linear). 1 when the
+ * effect is absent or bypassed. Currently honored for dialogue clips.
+ */
+export function clipLoudnessGain(clip: Clip): number {
+	if (clip.type !== 'dialogue') return 1;
+	const loud = clipEffects(clip).find((f) => f.name === 'Loudness' && f.on);
+	const param = loud?.params.find((p) => p.name === 'Gain') ?? loud?.params[0];
+	if (!loud || !param) return 1;
+	const db = Math.max(-24, Math.min(24, param.value));
+	return +Math.pow(10, db / 20).toFixed(4);
+}
+
+/**
+ * Normalize voice loudness: measure every rendered dialogue clip (RMS dB),
+ * average per character, then write a Loudness FX onto each rendered clip so
+ * every voice lands on the shared average. Clips without audio are skipped.
+ */
+export function normalizeVoiceClips(): void {
+	const byChar = new Map<string, number[]>();
+	for (const t of project.tracks) {
+		for (const c of t.clips) {
+			if (c.type !== 'dialogue') continue;
+			const buffer = getBuffer(c.id);
+			if (!buffer) continue;
+			const arr = byChar.get(c.characterId) ?? [];
+			arr.push(measureLoudnessDb(buffer));
+			byChar.set(c.characterId, arr);
+		}
+	}
+	if (!byChar.size) {
+		toast('Nothing to normalize — render voice clips first');
+		return;
+	}
+	const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+	const avgs = [...byChar].map(([id, dbs]) => ({ id, db: mean(dbs) }));
+	const target = +mean(avgs.map((a) => a.db)).toFixed(1);
+
+	let n = 0;
+	for (const { id, db } of avgs) {
+		const gainDb = +Math.max(-24, Math.min(24, target - db)).toFixed(1);
+		for (const t of project.tracks) {
+			for (const c of t.clips) {
+				if (c.type !== 'dialogue' || c.characterId !== id || !getBuffer(c.id)) continue;
+				const fx = clipEffects(c);
+				let loud = fx.find((f) => f.name === 'Loudness');
+				if (!loud) {
+					loud = { id: nextId('fx'), name: 'Loudness', on: true, params: makeEffectParams('Loudness') };
+					fx.push(loud);
+				}
+				const param = loud.params.find((p) => p.name === 'Gain') ?? loud.params[0];
+				if (!param) continue;
+				param.value = gainDb;
+				loud.on = true;
+				n++;
+			}
+		}
+	}
+	toast(`Voices normalized to ${target.toFixed(1)} dB — Loudness FX set on ${n} clip${n === 1 ? '' : 's'}`);
+}
+
+/**
+ * Load an MP3 (or any decodable audio file) from the computer onto a sound
+ * clip. Bytes go to the IndexedDB audio cache — never localStorage — and the
+ * project JSON keeps only the file reference. Clip length follows the audio.
+ */
+export async function importSoundFile(clipId: string, file: File): Promise<void> {
+	const clip = clipById(clipId);
+	if (!clip || clip.type !== 'sound') return;
+	try {
+		const raw = await file.arrayBuffer();
+		const safe = file.name.replace(/[^\w.\-]+/g, '_').slice(-60) || 'audio';
+		const fileId = `upload:${Date.now()}-${safe}`;
+		// Decode first (validates the file), then persist the bytes.
+		const buffer = await decodeAudioBytes(raw.slice(0));
+		await saveUploadedAudio(fileId, raw);
+		clip.file = fileId;
+		if (!clip.name || clip.name === 'Sound Effect') {
+			clip.name = file.name.replace(/\.[^.]+$/, '').slice(0, 60) || clip.name;
+		}
+		clip.duration = +buffer.duration.toFixed(2);
+		clip.waveform = computePeaks(buffer, 96);
+		clip.rendered = true;
+		setBuffer(clip.id, buffer);
+		markReady(clip.id);
+		toast(`Sound loaded (${buffer.duration.toFixed(1)}s) — cached, JSON keeps the reference`);
+	} catch {
+		toast('Could not decode that audio file');
+	}
+}
+
+/**
+ * Resolve a sound clip's audio: session memory first, then the uploads cache
+ * (user files) or the asset pipeline (library URLs).
+ */
+export async function resolveSoundBuffer(clip: SoundClip): Promise<AudioBuffer | null> {
+	const mem = getBuffer(clip.id);
+	if (mem) return mem;
+	if (!clip.file) return null;
+	try {
+		const buffer = clip.file.startsWith('upload:')
+			? await loadUploadedAudio(clip.file)
+			: await loadAudioBuffer(clip.file);
+		if (buffer) setBuffer(clip.id, buffer);
+		return buffer;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Rehydrate persisted renders after a page reload: for every clip that was
+ * rendered (dialogue synthesis or ambience mixdown), decode its cached WAV
+ * bytes back into a playable buffer. Runs once at startup.
+ */
+export async function restoreCachedAudio(): Promise<void> {
+	let n = 0;
+	for (const t of project.tracks) {
+		for (const c of t.clips) {
+			if (
+				(c.type === 'dialogue' || c.type === 'ambience') &&
+				c.rendered &&
+				c.waveform.length &&
+				!hasAudio(c.id)
+			) {
+				try {
+					const buffer = await loadCachedRender(c.id);
+					if (buffer) {
+						setBuffer(c.id, buffer);
+						markReady(c.id);
+						n++;
+					}
+				} catch {
+					/* corrupt entry — clip simply needs a re-render */
+				}
+			}
+		}
+	}
+	if (n) toast(`Restored ${n} cached render${n === 1 ? '' : 's'}`);
+}
+
 /* ------------------------------------------------------------------ */
 /* Playback                                                            */
 /* ------------------------------------------------------------------ */
@@ -755,9 +1181,24 @@ async function collectScheduledAsync(): Promise<ScheduledClip[]> {
 					duration: Math.min(effectiveDuration(clip), buffer.duration),
 					fadeIn: clip.fadeIn,
 					fadeOut: clip.fadeOut,
-					buffer
+					buffer,
+					gain: clipLoudnessGain(clip)
 				});
 			} else if (clip.type === 'ambience') {
+				// Prefer the rendered visible-length mixdown (matches the waveform).
+				const mixed = getBuffer(clip.id);
+				if (mixed) {
+					out.push({
+						id: clip.id,
+						start: clip.start,
+						duration: Math.min(clip.duration, mixed.duration),
+						fadeIn: clip.fadeIn,
+						fadeOut: clip.fadeOut,
+						buffer: mixed
+					});
+					continue;
+				}
+				// Fallback: live-mix layers (e.g. never rendered).
 				const activeLayers = (clip.layers || []).filter((l) => l.enabled && l.volume > 0.01);
 				for (const layer of activeLayers) {
 					try {
@@ -776,20 +1217,20 @@ async function collectScheduledAsync(): Promise<ScheduledClip[]> {
 						console.warn(`Could not load layer ${layer.name}:`, err);
 					}
 				}
-			} else if (clip.type === 'sound' && clip.file) {
-				try {
-					const buffer = await loadAudioBuffer(clip.file);
-					out.push({
-						id: clip.id,
-						start: clip.start,
-						duration: Math.min(clip.duration, buffer.duration),
-						fadeIn: clip.fadeIn,
-						fadeOut: clip.fadeOut,
-						buffer
-					});
-				} catch (err) {
-					console.warn(`Could not load sound ${clip.name}:`, err);
+			} else if (clip.type === 'sound') {
+				const buffer = await resolveSoundBuffer(clip);
+				if (!buffer) {
+					if (clip.file) console.warn(`Could not load sound ${clip.name}`);
+					continue;
 				}
+				out.push({
+					id: clip.id,
+					start: clip.start,
+					duration: Math.min(clip.duration, buffer.duration),
+					fadeIn: clip.fadeIn,
+					fadeOut: clip.fadeOut,
+					buffer
+				});
 			}
 		}
 	}
@@ -797,43 +1238,62 @@ async function collectScheduledAsync(): Promise<ScheduledClip[]> {
 }
 
 let playTimer: ReturnType<typeof setInterval> | null = null;
+/** Guards the async startup window so a fast double-press can't start playback twice. */
+let starting = false;
 
 export async function togglePlay() {
 	if (ui.playing) {
 		stopPlay();
 		return;
 	}
-
-	await resumeContext();
-	const scheduled = await collectScheduledAsync();
-	if (!scheduled.length) {
-		toast('No audio to play — render dialogue clips or enable an ambience loop');
-		return;
-	}
-
-	const from = ui.playhead >= totalDuration() - 0.05 ? 0 : ui.playhead;
-	startPlayback(scheduled, from);
-	ui.playing = true;
-
-	// Drive the display from the audio clock on a timer (rAF is paused in
-	// background/embedded contexts, which would leave the playhead stuck).
-	playTimer = setInterval(() => {
-		if (!ui.playing) return;
-		const t = elapsed();
-		if (t >= totalDuration()) {
-			ui.playhead = 0;
-			stopPlay();
+	if (starting) return;
+	starting = true;
+	try {
+		await resumeContext();
+		const scheduled = await collectScheduledAsync();
+		if (!scheduled.length) {
+			toast('No audio to play — render dialogue clips or enable an ambience loop');
 			return;
 		}
-		ui.playhead = +t.toFixed(2);
-	}, 50);
+
+		const from = ui.playhead >= totalDuration() - 0.05 ? 0 : ui.playhead;
+		startPlayback(scheduled, from);
+		ui.playing = true;
+
+		// Drive the display from the audio clock on a timer (rAF is paused in
+		// background/embedded contexts, which would leave the playhead stuck).
+		playTimer = setInterval(() => {
+			if (!ui.playing) return;
+			const t = elapsed();
+			if (t >= totalDuration()) {
+				ui.playhead = 0;
+				stopPlay(false);
+				return;
+			}
+			ui.playhead = +t.toFixed(2);
+		}, 50);
+	} finally {
+		starting = false;
+	}
 }
 
 function hasFishKey(): boolean {
 	return !!settings.fishAudioApiKey;
 }
 
-export function stopPlay() {
+/**
+ * Pause playback. By default the playhead is frozen at the exact audio-clock
+ * position (not the last 50ms display tick), so resume continues precisely
+ * where you stopped. Pass false when the caller sets the playhead itself.
+ */
+export function stopPlay(freezeAtAudioTime = true) {
+	if (freezeAtAudioTime && ui.playing) {
+		try {
+			ui.playhead = +elapsed().toFixed(2);
+		} catch {
+			/* keep last known playhead */
+		}
+	}
 	stopPlayback();
 	if (playTimer) {
 		clearInterval(playTimer);
@@ -846,7 +1306,7 @@ export function seek(s: number) {
 	const wasPlaying = ui.playing;
 	ui.playhead = Math.max(0, s);
 	if (wasPlaying) {
-		stopPlay();
+		stopPlay(false);
 		void togglePlay();
 	}
 }
@@ -857,8 +1317,31 @@ export function resetPlayhead() {
 	ui.playhead = 0;
 }
 
+/**
+ * Bounce the full timeline (all unmuted lanes, fades, loudness gains and
+ * looping ambience) to an MP3 blob for download. Returns null when there is
+ * nothing renderable yet.
+ */
+export async function exportTimelineMp3(): Promise<{ blob: Blob; duration: number } | null> {
+	const scheduled = await collectScheduledAsync();
+	if (!scheduled.length) {
+		toast('Nothing to export — render clips first');
+		return null;
+	}
+	const { renderOfflineMixdown } = await import('./audio');
+	const { encodeMp3 } = await import('./mp3');
+	const total = totalDuration();
+	const mixed = await renderOfflineMixdown(scheduled, total);
+	return { blob: await encodeMp3(mixed), duration: total };
+}
+
 /* ------------------------------------------------------------------ */
-/* Export                                                              */
+/* Export / Import                                                     */
+/*                                                                     */
+/* The JSON carries structure only — no audio. Rendered dialogue and    */
+/* ambience mixdowns are NOT included, so imported clips come back      */
+/* unrendered (waveforms for library sounds are regenerated) and need  */
+/* a re-render before playback.                                        */
 /* ------------------------------------------------------------------ */
 
 export function buildExport() {
@@ -872,7 +1355,8 @@ export function buildExport() {
 			color: c.color,
 			voiceId: c.voiceId,
 			defaultEmotion: c.emotion,
-			face: c.face
+			// Omit the bulky face object when no avatar is set.
+			...(c.face ? { face: c.face } : {})
 		})),
 		tracks: project.tracks.map((t) => ({
 			id: t.id,
@@ -890,19 +1374,244 @@ export function buildExport() {
 							rendered: c.rendered,
 							fadeIn: round2(c.fadeIn),
 							fadeOut: round2(c.fadeOut),
-							effects: c.effects.filter((e) => e.on).map((e) => e.name)
+							effects: clipEffects(c).filter((e) => e.on).map((e) => e.name)
 						}
-					: {
-							id: c.id,
-							type: 'sound',
-							name: c.name,
-							icon: c.icon,
-							start: round2(c.start),
-							duration: round2(c.duration),
-							fadeIn: round2(c.fadeIn),
-							fadeOut: round2(c.fadeOut)
-						}
+					: c.type === 'ambience'
+						? {
+								id: c.id,
+								type: 'ambience',
+								name: c.name,
+								icon: c.icon,
+								start: round2(c.start),
+								duration: round2(c.duration),
+								fadeIn: round2(c.fadeIn),
+								fadeOut: round2(c.fadeOut),
+								layers: (c.layers || []).map((l) => ({
+									id: l.id,
+									name: l.name,
+									icon: l.icon,
+									file: l.file,
+									volume: +l.volume.toFixed(3),
+									enabled: l.enabled
+								})),
+								effects: clipEffects(c).filter((e) => e.on).map((e) => e.name)
+							}
+						: {
+								id: c.id,
+								type: 'sound',
+								name: c.name,
+								icon: c.icon,
+								start: round2(c.start),
+								duration: round2(c.duration),
+								fadeIn: round2(c.fadeIn),
+								fadeOut: round2(c.fadeOut),
+								// Audio bytes stay in the cache — the JSON keeps only the reference.
+								...(c.file ? { file: c.file } : {}),
+								effects: clipEffects(c).filter((e) => e.on).map((e) => e.name)
+							}
 			)
 		}))
 	};
+}
+
+type ImportResult = { ok: true } | { ok: false; error: string };
+
+function importStr(v: unknown, fallback: string): string {
+	return typeof v === 'string' && v ? v : fallback;
+}
+
+function importNum(v: unknown, fallback: number, min = 0): number {
+	return typeof v === 'number' && Number.isFinite(v) ? Math.max(min, +v.toFixed(2)) : fallback;
+}
+
+function importEffects(names: unknown): AudioEffect[] {
+	const all = defaultEffects();
+	if (!Array.isArray(names)) return all;
+	const on = new Set(names.filter((n): n is string => typeof n === 'string'));
+	for (const fx of all) fx.on = on.has(fx.name);
+	return all;
+}
+
+/**
+ * Load a project from pasted export JSON, replacing the current project.
+ * Structure-only: clips come back unrendered (no audio in the JSON) and any
+ * in-memory/cached audio of the replaced project is dropped.
+ */
+export function importProject(raw: string): ImportResult {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw);
+	} catch {
+		return { ok: false, error: 'Invalid JSON — check for typos or truncation.' };
+	}
+	if (!parsed || typeof parsed !== 'object') {
+		return { ok: false, error: 'Not a project export (expected a JSON object).' };
+	}
+	const data = parsed as Record<string, unknown>;
+	if (!Array.isArray(data.tracks) || !Array.isArray(data.characters)) {
+		return { ok: false, error: 'Not a project export (missing tracks or characters).' };
+	}
+
+	try {
+		const characters: Character[] = (data.characters as unknown[]).map((rawC, i) => {
+			const c = (rawC ?? {}) as Record<string, unknown>;
+			const voiceId = importStr(c.voiceId, `fish-voice-imported-${i + 1}`);
+			return {
+				id: importStr(c.id, nextId('char')),
+				name: importStr(c.name, `Character ${i + 1}`),
+				voiceId,
+				language: importStr(c.language, 'English'),
+				voicePreset: undefined,
+				color: importStr(c.color, PALETTE[i % PALETTE.length]),
+				emotion: importStr(c.defaultEmotion ?? c.emotion, 'neutral'),
+				// Avatar stays absent unless the JSON carries one.
+				face:
+					c.face && typeof c.face === 'object' ? (c.face as FaceConfig) : undefined
+			};
+		});
+
+		const tracks: Track[] = (data.tracks as unknown[]).map((rawT, ti) => {
+			const t = (rawT ?? {}) as Record<string, unknown>;
+			const clips: Clip[] = Array.isArray(t.clips)
+				? (t.clips as unknown[]).flatMap((rawC): Clip[] => {
+						const c = (rawC ?? {}) as Record<string, unknown>;
+						const type = c.type === 'dialogue' || c.type === 'ambience' ? c.type : 'sound';
+						const start = importNum(c.start, 0);
+						const fadeIn = importNum(c.fadeIn, 0);
+						const fadeOut = importNum(c.fadeOut, 0);
+						const id = importStr(c.id, nextId('clip'));
+						if (type === 'dialogue') {
+							const clip: DialogueClip = {
+								id,
+								type: 'dialogue',
+								characterId: importStr(c.characterId, ''),
+								text: importStr(c.text, ''),
+								start,
+								fadeIn,
+								fadeOut,
+								rendered: false,
+								rendering: false,
+								duration: null,
+								waveform: [],
+								effects: importEffects(c.effects),
+								renderError: null
+							};
+							return [clip];
+						}
+						if (type === 'ambience') {
+							const layers = Array.isArray(c.layers)
+								? (c.layers as unknown[]).map((rawL, li) => {
+										const l = (rawL ?? {}) as Record<string, unknown>;
+										const volume =
+											typeof l.volume === 'number' && Number.isFinite(l.volume)
+												? Math.max(0, Math.min(1, l.volume))
+												: 0.5;
+										return {
+											id: importStr(l.id, `ambience-imported-${li}`),
+											name: importStr(l.name, `Layer ${li + 1}`),
+											icon: importStr(l.icon, 'graphic_eq'),
+											file: importStr(l.file, ''),
+											volume,
+											enabled: l.enabled !== false && volume > 0
+										};
+									})
+								: [];
+							const clip: AmbienceClip = {
+								id,
+								type: 'ambience',
+								name: importStr(c.name, 'Ambience Atmosphere'),
+								icon: importStr(c.icon, 'filter_drama'),
+								duration: importNum(c.duration, 10, 0.3),
+								start,
+								fadeIn,
+								fadeOut,
+								rendered: false,
+								rendering: false,
+								waveform: [],
+								layers,
+								effects: importEffects(c.effects)
+							};
+							return [clip];
+						}
+						const fileRef = typeof c.file === 'string' && c.file ? c.file : undefined;
+						const clip: SoundClip = {
+							id,
+							type: 'sound',
+							name: importStr(c.name, 'Sound Effect'),
+							icon: importStr(c.icon, 'volume_up'),
+							duration: importNum(c.duration, 2, 0.2),
+							start,
+							fadeIn,
+							fadeOut,
+							rendered: true,
+							rendering: false,
+							// Waveform returns once the referenced audio resolves
+							// (same-browser cache) — otherwise it stays empty.
+							waveform: [],
+							file: fileRef,
+							effects: importEffects(c.effects)
+						};
+						return [clip];
+					})
+				: [];
+			return {
+				id: importStr(t.id, nextId('track')),
+				name: importStr(t.name, `Lane ${ti + 1}`),
+				muted: t.muted === true,
+				clips
+			};
+		});
+
+		if (!tracks.length) return { ok: false, error: 'The export contains no lanes.' };
+
+		// Drop the replaced project's audio (memory + persisted renders).
+		stopPlay();
+		for (const t of project.tracks) {
+			for (const c of t.clips) {
+				clearBuffer(c.id);
+				markGone(c.id);
+				void deleteCachedRender(c.id);
+			}
+		}
+
+		const incoming: Project = {
+			name: importStr(data.project, 'Imported Project'),
+			characters,
+			tracks
+		};
+		normalizeProject(incoming);
+		syncIdCounter(incoming);
+		project.name = incoming.name;
+		project.characters = incoming.characters;
+		project.tracks = incoming.tracks;
+
+		ui.selectedClipId = null;
+		ui.editingClipId = null;
+		ui.fxClipId = null;
+		ui.playhead = 0;
+		saveProjectNow();
+
+		// Same-browser round-trip: re-resolve referenced sound files from the
+		// uploads cache so waveforms and playback come back without re-upload.
+		for (const t of project.tracks) {
+			for (const c of t.clips) {
+				if (c.type !== 'sound' || !c.file) continue;
+				void resolveSoundBuffer(c).then((buffer) => {
+					if (!buffer) return;
+					c.waveform = computePeaks(buffer, 96);
+					c.duration = Math.min(c.duration, +buffer.duration.toFixed(2));
+					markReady(c.id);
+				});
+			}
+		}
+
+		const clipCount = tracks.reduce((n, t) => n + t.clips.length, 0);
+		toast(`Project “${project.name}” loaded (${clipCount} clips — re-render audio to play)`);
+		return { ok: true };
+	} catch (e) {
+		return {
+			ok: false,
+			error: e instanceof Error ? `Could not load project: ${e.message}` : 'Could not load project.'
+		};
+	}
 }

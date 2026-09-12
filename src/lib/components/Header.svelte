@@ -1,5 +1,7 @@
 <script lang="ts">
-	import { ui, project } from '$lib/project.svelte';
+	import { ui, project, normalizeVoiceClips } from '$lib/project.svelte';
+
+	let showTools = $state(false);
 
 	type TabId = 'timeline' | 'characters' | 'export';
 	const tabs: { id: TabId; label: string; icon: string; count?: () => number }[] = [
@@ -50,6 +52,37 @@
 	</div>
 
 	<div class="flex-1 lg:hidden"></div>
+
+	<!-- tools menu -->
+	<div class="relative">
+		<button
+			class="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-white/5 hover:text-white"
+			title="Tools"
+			onclick={() => (showTools = !showTools)}
+		>
+			<span class="material-symbols-rounded text-[19px]">auto_fix_high</span>
+		</button>
+		{#if showTools}
+			<div
+				class="absolute right-0 top-full z-50 mt-1 w-60 overflow-hidden rounded-lg border border-white/10 bg-[#202635] shadow-2xl"
+			>
+				<button
+					class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-gray-200 transition hover:bg-white/5"
+					onclick={() => {
+						showTools = false;
+						normalizeVoiceClips();
+					}}
+					title="Measure rendered voice clips and set a Loudness FX per voice so all match"
+				>
+					<span class="material-symbols-rounded text-[15px] text-cyan-300">equalizer</span>
+					<span class="flex-1">Normalize voice clips</span>
+				</button>
+				<div class="px-3 pb-2 text-[10px] leading-snug text-gray-500">
+					Sets a Loudness FX on every rendered voice clip so all voices match.
+				</div>
+			</div>
+		{/if}
+	</div>
 
 	<!-- settings -->
 	<button

@@ -17,14 +17,32 @@ export interface Character {
 	voicePreset?: string;
 	color: string;
 	emotion: string;
-	/** facesjs face object — the deterministic "seed" for this speaker's avatar */
-	face: FaceConfig;
+	/**
+	 * Optional facesjs avatar ("icon"). Absent by default and omitted from the
+	 * export JSON when unset — saves significant token space. Generate one via
+	 * rerollFace, remove it via removeFace.
+	 */
+	face?: FaceConfig;
+}
+
+export interface EffectParam {
+	name: string;
+	/** current value in real units (e.g. ms, %, dB) */
+	value: number;
+	min: number;
+	max: number;
+	step: number;
+	/** unit suffix shown after the value (e.g. '%', ' ms', ' dB', ' st') */
+	unit: string;
 }
 
 export interface AudioEffect {
+	/** unique per clip (several instances of one type may coexist) */
+	id: string;
+	/** effect type name, e.g. 'Echo' — see EFFECT_TYPES */
 	name: string;
 	on: boolean;
-	value: string;
+	params: EffectParam[];
 }
 
 export interface BaseClip {
@@ -58,6 +76,8 @@ export interface SoundClip extends BaseClip {
 	duration: number;
 	waveform: number[];
 	file?: string;
+	/** per-clip FX toggles (engine application for non-dialogue clips: not yet implemented) */
+	effects: AudioEffect[];
 }
 
 export interface AmbienceLayer {
@@ -77,6 +97,8 @@ export interface AmbienceClip extends BaseClip {
 	duration: number;
 	waveform: number[];
 	layers: AmbienceLayer[];
+	/** per-clip FX toggles (engine application for ambience: not yet implemented) */
+	effects: AudioEffect[];
 }
 
 export type Clip = DialogueClip | SoundClip | AmbienceClip;

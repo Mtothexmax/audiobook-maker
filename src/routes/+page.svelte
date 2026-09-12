@@ -1,10 +1,22 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import Header from '$lib/components/Header.svelte';
 	import TimelineView from '$lib/components/TimelineView.svelte';
 	import CharactersView from '$lib/components/CharactersView.svelte';
 	import ExportView from '$lib/components/ExportView.svelte';
 	import SettingsModal from '$lib/components/SettingsModal.svelte';
-	import { ui, toasts } from '$lib/project.svelte';
+	import { ui, toasts, project, persistProjectSoon, restoreCachedAudio } from '$lib/project.svelte';
+
+	/* Autosave the project JSON (audio-free) to localStorage on any change. */
+	$effect(() => {
+		JSON.stringify(project);
+		persistProjectSoon();
+	});
+
+	/* Rehydrate persisted renders (dialogue + ambience mixdowns) after reload. */
+	onMount(() => {
+		void restoreCachedAudio();
+	});
 </script>
 
 <div class="flex h-screen flex-col overflow-hidden bg-[#0d1119] text-gray-200">
