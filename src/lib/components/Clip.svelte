@@ -202,11 +202,16 @@
 	}
 
 	/** Open the clip's FX menu in the bottom drawer. */
-	function openFx(e: MouseEvent) {
-		e.stopPropagation();
+	function openFxPanel() {
 		selectClipExclusive(clip.id);
 		ui.editingClipId = clip.id;
 		ui.fxClipId = clip.id;
+	}
+
+	/** FX badge on the clip body (stops the drag/click from reaching the clip). */
+	function openFx(e: MouseEvent) {
+		e.stopPropagation();
+		openFxPanel();
 	}
 
 	/* ------------------------------------------------------------------ */
@@ -424,7 +429,7 @@
 			<!-- text line (dialogue) -->
 			{#if clip.type === 'dialogue'}
 				<div class="pointer-events-none truncate text-[10px] leading-tight text-gray-400/90">
-					{@html renderTagged(clip.text, 90)}
+					{@html renderTagged(clip.text, 90, true)}
 				</div>
 			{/if}
 		</div>
@@ -486,6 +491,24 @@
 		style="left: {contextMenuPos.x}px; top: {contextMenuPos.y}px;"
 		onclick={(e) => e.stopPropagation()}
 	>
+		<button
+			class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-gray-200 hover:bg-white/5"
+			onclick={() => {
+				openEditor();
+				closeContextMenu();
+			}}
+		>
+			<span class="material-symbols-rounded text-[15px] text-gray-300">edit</span>Edit clip
+		</button>
+		<button
+			class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-gray-200 hover:bg-white/5"
+			onclick={() => {
+				openFxPanel();
+				closeContextMenu();
+			}}
+		>
+			<span class="material-symbols-rounded text-[15px] text-violet-300">tune</span>FX
+		</button>
 		<button
 			class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-gray-200 hover:bg-white/5"
 			onclick={deleteClipFromMenu}

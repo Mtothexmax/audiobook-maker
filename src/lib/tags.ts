@@ -76,8 +76,12 @@ function escapeHtml(s: string): string {
 /**
  * Renders text with Fish Audio directives as highlighted chips.
  * Pauses = amber, emotions = violet, emphasis = cyan, speed = emerald.
+ * Full mode names the whole tag (`emotion:whisper`) — for the editor.
+ * Compact mode shows only the icon (emotions) or icon + value (`0.5` for
+ * `[pause:0.5]`) — for the space-constrained timeline clips. The full tag
+ * is always kept in the chip's title for hover.
  */
-export function renderTagged(text: string, truncate?: number): string {
+export function renderTagged(text: string, truncate?: number, compact = false): string {
 	let t = text || '';
 	if (truncate && t.length > truncate) t = t.slice(0, truncate) + '…';
 	const esc = escapeHtml(t);
@@ -101,9 +105,17 @@ export function renderTagged(text: string, truncate?: number): string {
 						: kind === 'emotion'
 							? emotionIcon(p1.split(':').slice(1).join(':'))
 							: 'theater_comedy';
-		return `<span class="inline-flex items-center gap-0.5 rounded-full border px-1.5 py-px text-[10px] font-medium whitespace-nowrap ${cls}">
-			<span class="material-symbols-rounded text-[11px]">${icon}</span>${p1}</span>`;
+		const label = compact ? compactTagLabel(kind, p1) : p1;
+		return `<span class="inline-flex items-center gap-0.5 rounded-full border px-1.5 py-px text-[10px] font-medium whitespace-nowrap ${cls}" title="${p1}">
+			<span class="material-symbols-rounded text-[11px]">${icon}</span>${label}</span>`;
 	});
+}
+
+/** Short chip label for the timeline: emotions → icon only, the rest → value after the colon. */
+function compactTagLabel(kind: TagKind, p1: string): string {
+	if (kind === 'emotion') return '';
+	const i = p1.indexOf(':');
+	return i >= 0 ? p1.slice(i + 1) : '';
 }
 
 /**
