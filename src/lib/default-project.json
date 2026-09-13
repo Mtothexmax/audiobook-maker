@@ -1,0 +1,214 @@
+{
+  "version": 1,
+  "project": "Harry Potter and the Methods of Rationality - Chapter 1",
+  "engine": "fish-audio",
+  "characters": [
+    {
+      "id": "char-120",
+      "name": "Harry",
+      "color": "#0891b2",
+      "voiceId": "07453ee9d10e458fb4178ab04d71fa14",
+      "defaultEmotion": "neutral"
+    },
+    {
+      "id": "char-124",
+      "name": "Michael Verres-Evans",
+      "color": "#10b981",
+      "voiceId": "f6304ccef48742459170919baabfee1c",
+      "defaultEmotion": "neutral"
+    },
+    {
+      "id": "char-126",
+      "name": "Narrator",
+      "color": "#ef4444",
+      "voiceId": "fish-voice-narrator-01",
+      "defaultEmotion": "neutral"
+    },
+    {
+      "id": "char-101",
+      "name": "Hermione",
+      "color": "#8b5cf6",
+      "voiceId": "d8f6ccfc4e3c4cc690ae348b5e590715",
+      "defaultEmotion": "calm"
+    },
+    {
+      "id": "char-121",
+      "name": "Ron",
+      "color": "#64748b",
+      "voiceId": "d436ea25aa854a2baf88e5ab4c484a26",
+      "defaultEmotion": "neutral"
+    },
+    {
+      "id": "char-122",
+      "name": "Dumbledore",
+      "color": "#ec4899",
+      "voiceId": "f402382e23f64df58961ca07f76c8bc8",
+      "defaultEmotion": "neutral"
+    },
+    {
+      "id": "char-123",
+      "name": "Malfoy",
+      "color": "#f59e0b",
+      "voiceId": "2e75f8f58d344eaba4b648fa69dbec62",
+      "defaultEmotion": "neutral"
+    }
+  ],
+  "tracks": [
+    {
+      "id": "track-104",
+      "name": "Narration & Dialogue",
+      "muted": false,
+      "clips": [
+        {
+          "id": "d1",
+          "type": "dialogue",
+          "characterId": "char-126",
+          "text": "The morning sun filtered through the spotless windows of the Verres-Evans household in Oxford, illuminating a kitchen table cluttered with academic journals and small electronic components.",
+          "start": 0,
+          "duration": 11.02,
+          "rendered": true,
+          "fadeIn": 0.4,
+          "fadeOut": 0.3,
+          "effects": [
+            "Echo",
+            "Reverb",
+            "Loudness"
+          ]
+        },
+        {
+          "id": "d2",
+          "type": "dialogue",
+          "characterId": "char-124",
+          "text": "[emotion:neutral] Harry, my boy, the post has arrived. Though I suspect your current book on game theory will have to pause for breakfast.",
+          "start": 11.6,
+          "duration": 8.28,
+          "rendered": true,
+          "fadeIn": 0,
+          "fadeOut": 0,
+          "effects": [
+            "Echo",
+            "Reverb",
+            "Loudness"
+          ]
+        },
+        {
+          "id": "d3",
+          "type": "dialogue",
+          "characterId": "char-126",
+          "text": "Resting quietly among the bills was an envelope made of thick, heavy parchment, addressed in striking emerald-green ink.",
+          "start": 20.5,
+          "duration": 8.7,
+          "rendered": true,
+          "fadeIn": 0.1,
+          "fadeOut": 0.2,
+          "effects": [
+            "Echo",
+            "Reverb",
+            "Loudness"
+          ]
+        },
+        {
+          "id": "d4",
+          "type": "dialogue",
+          "characterId": "char-120",
+          "text": "[emotion:curious] Fascinating. The structural integrity of this paper defies standard mass-production methods, and the ink composition is entirely anomalous.",
+          "start": 29.8,
+          "duration": 8.28,
+          "rendered": true,
+          "fadeIn": 0,
+          "fadeOut": 0,
+          "effects": [
+            "Echo",
+            "Reverb",
+            "Loudness"
+          ]
+        },
+        {
+          "id": "d5",
+          "type": "dialogue",
+          "characterId": "char-124",
+          "text": "[emotion:skeptical] Let me see that, Harry. Unless Oxford’s physics department has taken to elaborate practical jokes, I’d say we have an empirical impossibility on our hands.",
+          "start": 38.7,
+          "duration": 10.42,
+          "rendered": true,
+          "fadeIn": 0.2,
+          "fadeOut": 0.2,
+          "effects": [
+            "Echo",
+            "Reverb",
+            "Loudness"
+          ]
+        },
+        {
+          "id": "d6",
+          "type": "dialogue",
+          "characterId": "char-126",
+          "text": "Thus began a sequence of events that would test the very limits of human reason and scientific inquiry.",
+          "start": 49.7,
+          "duration": 6.24,
+          "rendered": true,
+          "fadeIn": 0.2,
+          "fadeOut": 0.5,
+          "effects": [
+            "Echo",
+            "Reverb",
+            "Loudness"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "track-105",
+      "name": "Music & Ambience",
+      "muted": false,
+      "clips": [
+        {
+          "id": "sfx-101",
+          "type": "sound",
+          "name": "paper rustling",
+          "icon": "volume_up",
+          "start": 21,
+          "duration": 1.2,
+          "fadeIn": 0.5,
+          "fadeOut": 0.5,
+          "file": "upload:1789249633085-freesound_community-paper-rustle-81855.mp3",
+          "effects": [
+            "Reverb",
+            "Loudness"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "track-106",
+      "name": "Atmosphere",
+      "muted": false,
+      "clips": [
+        {
+          "id": "amb-128",
+          "type": "ambience",
+          "name": "Ambience Atmosphere",
+          "icon": "filter_drama",
+          "start": 5.2,
+          "duration": 30,
+          "fadeIn": 1.5,
+          "fadeOut": 2,
+          "layers": [
+            {
+              "id": "ambience-birdsong-nature",
+              "name": "Birdsong",
+              "icon": "nature",
+              "file": "/assets/ambience/Birdsong__nature.mp3",
+              "volume": 0.5,
+              "enabled": true
+            }
+          ],
+          "effects": [
+            "Echo",
+            "Reverb"
+          ]
+        }
+      ]
+    }
+  ]
+}

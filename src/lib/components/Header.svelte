@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { ui, project, normalizeVoiceClips } from '$lib/project.svelte';
+	import InsertPauseModal from './InsertPauseModal.svelte';
 
 	let showTools = $state(false);
+	let showPauseModal = $state(false);
 
 	type TabId = 'timeline' | 'characters' | 'export';
 	const tabs: { id: TabId; label: string; icon: string; count?: () => number }[] = [
@@ -16,7 +18,7 @@
 	<div class="flex w-56 items-center gap-2">
 		<span class="material-symbols-rounded text-[22px] text-violet-400">auto_stories</span>
 		<div class="leading-tight">
-			<div class="text-sm font-semibold tracking-tight text-gray-100">Audiobook Studio</div>
+			<div class="text-sm font-semibold tracking-tight text-gray-100">Audiobook Maker</div>
 				<div class="text-[10px] text-gray-500">Fish Audio TTS</div>
 		</div>
 	</div>
@@ -70,6 +72,22 @@
 					class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-gray-200 transition hover:bg-white/5"
 					onclick={() => {
 						showTools = false;
+						showPauseModal = true;
+					}}
+					title="Clips pro Bahn mit einstellbarem Abstand auseinander schieben (Vorschau inklusive)"
+				>
+					<span class="material-symbols-rounded text-[15px] text-cyan-300">pause_circle</span>
+					<span class="flex-1">Pause einfügen</span>
+				</button>
+				<div class="px-3 pb-2 text-[10px] leading-snug text-gray-500">
+					Abstand frei wählbar (Standard 0,6s) — wirkt pro Bahn, wahlweise nur auf per Strg+Klick
+					ausgewählte Clips.
+				</div>
+				<div class="mx-3 border-t border-white/10"></div>
+				<button
+					class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-gray-200 transition hover:bg-white/5"
+					onclick={() => {
+						showTools = false;
 						normalizeVoiceClips();
 					}}
 					title="Measure rendered voice clips and set a Loudness FX per voice so all match"
@@ -83,6 +101,10 @@
 			</div>
 		{/if}
 	</div>
+
+	{#if showPauseModal}
+		<InsertPauseModal onclose={() => (showPauseModal = false)} />
+	{/if}
 
 	<!-- settings -->
 	<button

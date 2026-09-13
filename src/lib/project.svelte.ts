@@ -1,4 +1,5 @@
 // runes ($state) are compiler-injected in .svelte.ts files — no import needed
+import { untrack } from 'svelte';
 import { generate } from 'facesjs';
 import type { FaceConfig } from 'facesjs';
 import type {
@@ -14,6 +15,7 @@ import type {
 	VoicePreset
 } from './types';
 import audioCatalog from './audio-catalog.json';
+import defaultProjectJson from './default-project.json';
 import { estimateDuration, toFishText } from './tags';
 import { genWaveform } from './waveform';
 import {
@@ -344,71 +346,33 @@ export function makeAmbience(
 		rendering: false,
 		waveform: [],
 		layers: [],
-		effects: defaultEffects()
+		// Fresh ambience starts dry — no FX engaged until the user enables one.
+		effects: defaultEffects().map((fx) => ({ ...fx, on: false }))
 	};
 }
 
 function initialProject(): Project {
-	const mara = makeCharacter('Mara', 'fish-voice-mara-01', 'calm', PALETTE[0], 'female', 'English', 'en-mara');
-	const elias = makeCharacter('Elias', 'fish-voice-elias-07', 'neutral', PALETTE[1], 'male', 'English', 'en-elias');
-	const narrator = makeCharacter('Narrator', 'fish-voice-narrator-01', 'calm', PALETTE[2], undefined, 'English', 'en-narrator');
-
-	const track1: Track = {
-		id: nextId('track'),
-		name: 'Narration & Dialogue',
-		muted: false,
-		clips: [
-			makeDialogue('d1', narrator.id, 'The harbor lights flickered through the fog.', 0, {
-				fadeIn: 0.4,
-				fadeOut: 0.3
-			}),
-			makeDialogue(
-				'd2',
-				mara.id,
-				'[emotion:whisper] Did you hear that? [pause:0.4] Something is moving out there.',
-				12.2,
-				{ rendered: false }
-			),
-			makeDialogue('d3', elias.id, '[emotion:angry] Stay behind me. [pause:0.3] Do not move.', 20.1, {
-				fadeIn: 0.1,
-				fadeOut: 0.2
-			}),
-			makeDialogue(
-				'd4',
-				narrator.id,
-				'She held her breath [pause:0.5] and listened to the waves.',
-				27.4,
-				{ rendered: false }
-			)
-		]
-	};
-
-	const track2: Track = {
-		id: nextId('track'),
-		name: 'Music & Ambience',
-		muted: false,
-		clips: [
-			makeAmbience('a1', 'Rainy Night Atmosphere', 28, 0, { fadeIn: 1.5, fadeOut: 2.5 }),
-			makeDialogue('d5', mara.id, '[emotion:excited] Listen — the rain is letting up!', 13.5, {
-				fadeIn: 0.2,
-				fadeOut: 0.2
-			}),
-			makeSound('s2', 'Thunder Clap', 'thunderstorm', 1.3, 18.6, { fadeOut: 0.2 })
-		]
-	};
-
-	const track3: Track = {
-		id: nextId('track'),
-		name: 'Atmosphere',
-		muted: false,
-		clips: [makeSound('s3', 'Crowd Murmur', 'groups', 5, 6.5)]
-	};
-
-	return {
-		name: 'The Glass Harbor',
-		characters: [mara, elias, narrator],
-		tracks: [track1, track2, track3]
-	};
+	// Fresh installs (no saved project) start from the bundled default
+	// project (export JSON). Same conversion as a pasted import, so clips
+	// come back unrendered — audio bytes are never inside the JSON.
+	try {
+		const built = buildImportProject(defaultProjectJson as unknown as Record<string, unknown>);
+		const incoming: Project = {
+			name: built.name,
+			characters: built.characters,
+			tracks: built.tracks
+		};
+		normalizeProject(incoming);
+		syncIdCounter(incoming);
+		return incoming;
+	} catch {
+		// Bundled default is corrupt — start blank rather than breaking startup.
+		return {
+			name: 'New Project',
+			characters: [],
+			tracks: [{ id: nextId('track'), name: 'Lane 1', muted: false, clips: [] }]
+		};
+	}
 }
 
 /* ------------------------------------------------------------------ */
@@ -561,12 +525,79 @@ export const ui = $state({
 	playhead: 0,
 	playing: false,
 	selectedClipId: null as string | null,
+	/** multi-selection for batch tools (Ctrl/Cmd+click on clips) — always contains selectedClipId when set */
+	selectedClipIds: [] as string[],
 	editingClipId: null as string | null,
 	/** when set to the editing clip's id, the bottom drawer shows its FX menu */
 	fxClipId: null as string | null,
 	selectedCharacterId: null as string | null,
 	settingsOpen: false
 });
+
+/* ------------------------------------------------------------------ */
+/* Multi-selection helpers (batch tools operate on these)              */
+/* ------------------------------------------------------------------ */
+
+/** True when the clip is part of the current (multi-)selection. */
+export function isClipSelected(clipId: string): boolean {
+	if (ui.selectedClipId === clipId) return true;
+	return ui.selectedClipIds.includes(clipId);
+}
+
+/** Exclusive single selection (plain click). Keeps the array in sync. */
+export function selectClipExclusive(clipId: string) {
+	ui.selectedClipId = clipId;
+	ui.selectedClipIds = [clipId];
+	// If the bottom drawer is already open, it follows a single-click
+	// selection (it only needs a double-click to open from closed).
+	if (ui.editingClipId && ui.editingClipId !== clipId) {
+		ui.editingClipId = clipId;
+		ui.fxClipId = null;
+	}
+}
+
+/** Toggle one clip in the multi-selection (Ctrl/Cmd+click). */
+export function toggleClipSelected(clipId: string) {
+	const idx = ui.selectedClipIds.indexOf(clipId);
+	if (idx >= 0) {
+		ui.selectedClipIds.splice(idx, 1);
+		if (ui.selectedClipId === clipId) {
+			ui.selectedClipId = ui.selectedClipIds.length
+				? ui.selectedClipIds[ui.selectedClipIds.length - 1]
+				: null;
+		}
+	} else {
+		ui.selectedClipIds.push(clipId);
+		ui.selectedClipId = clipId;
+	}
+}
+
+/** Clear the whole clip selection. */
+export function clearClipSelection() {
+	ui.selectedClipId = null;
+	ui.selectedClipIds = [];
+}
+
+/** Replace the whole multi-selection (rubber-band select). No editor side-effects. */
+export function setSelectedClipIds(ids: string[]) {
+	const uniq = [...new Set(ids)];
+	ui.selectedClipIds = uniq;
+	ui.selectedClipId = uniq.length ? uniq[uniq.length - 1] : null;
+}
+
+/** All currently selected clips (project order). */
+export function selectedClips(): Clip[] {
+	if (!ui.selectedClipIds.length && !ui.selectedClipId) return [];
+	const ids = new Set(ui.selectedClipIds);
+	if (ui.selectedClipId) ids.add(ui.selectedClipId);
+	const out: Clip[] = [];
+	for (const t of project.tracks) {
+		for (const c of t.clips) {
+			if (ids.has(c.id)) out.push(c);
+		}
+	}
+	return out;
+}
 
 /* ------------------------------------------------------------------ */
 /* Settings (Fish Audio API key) — persisted in localStorage           */
@@ -773,6 +804,7 @@ export function toggleMute(trackId: string) {
 	if (!t) return;
 	t.muted = !t.muted;
 	toast(`${t.name}: ${t.muted ? 'muted' : 'unmuted'}`);
+	refreshPlaybackSoon();
 }
 
 /** Add an empty dialogue clip at the end of a lane and open the editor. */
@@ -787,6 +819,7 @@ export function addLineClip(trackId: string) {
 	);
 	track.clips.push(c);
 	ui.selectedClipId = c.id;
+	ui.selectedClipIds = [c.id];
 	ui.editingClipId = c.id;
 	toast('Dialogue clip added — write the line');
 }
@@ -805,6 +838,7 @@ export function addSoundClip(trackId: string, preset: SoundPreset, start?: numbe
 	);
 	track.clips.push(c);
 	ui.selectedClipId = c.id;
+	ui.selectedClipIds = [c.id];
 	toast(`“${preset.name}” added to ${track.name}`);
 }
 
@@ -832,6 +866,7 @@ export function addCategoryClip(trackId: string, category: SoundCategory, start?
 
 	track.clips.push(clip);
 	ui.selectedClipId = clip.id;
+	ui.selectedClipIds = [clip.id];
 	ui.editingClipId = clip.id;
 	toast(`“${catInfo.name}” clip added to ${track.name}`);
 	return clip;
@@ -861,6 +896,9 @@ export function deleteClip(clipId: string) {
 	if (ui.editingClipId === clipId) ui.editingClipId = null;
 	if (ui.fxClipId === clipId) ui.fxClipId = null;
 	if (ui.selectedClipId === clipId) ui.selectedClipId = null;
+	const selIdx = ui.selectedClipIds.indexOf(clipId);
+	if (selIdx >= 0) ui.selectedClipIds.splice(selIdx, 1);
+	refreshPlaybackSoon();
 }
 
 export function duplicateClip(clipId: string) {
@@ -883,13 +921,182 @@ export function duplicateClip(clipId: string) {
 	// sound/ambience keep their numeric duration; ambience keeps its layers
 	track.clips.push(copy);
 	ui.selectedClipId = copy.id;
+	ui.selectedClipIds = [copy.id];
 	ui.editingClipId = copy.id;
 	toast('Clip duplicated');
 }
 
+/* ------------------------------------------------------------------ */
+/* Positional preview overlay (e.g. the Insert-pause dialog): maps clip  */
+/* ids to a preview start that the timeline renders INSTEAD of the real  */
+/* start — without mutating the project. Cleared on cancel/apply, so the */
+/* dialog can only ever commit via applyPauseGap.                        */
+/* ------------------------------------------------------------------ */
+
+export const previewStarts = $state<Record<string, number>>({});
+
+/**
+ * Replace the whole preview map. MUST run untracked: callers invoke this
+ * from an $effect, and enumerating previewStarts' keys (Object.keys) would
+ * otherwise subscribe that effect to the very map it writes — the keyset
+ * churn (delete + re-add) re-triggers the effect forever (browser freeze).
+ * Only keys that actually changed are touched, so unmoved clips don't
+ * re-render either.
+ */
+export function setPausePreview(entries: Record<string, number>) {
+	untrack(() => {
+		for (const k of Object.keys(previewStarts)) {
+			if (!(k in entries)) delete previewStarts[k];
+		}
+		for (const [k, v] of Object.entries(entries)) {
+			if (previewStarts[k] !== v) previewStarts[k] = v;
+		}
+	});
+}
+
+export function clearPausePreview() {
+	untrack(() => {
+		for (const k of Object.keys(previewStarts)) delete previewStarts[k];
+	});
+}
+
+/* ------------------------------------------------------------------ */
+/* Insert pause — push clips apart so consecutive clips on the same    */
+/* lane keep at least `pauseSec` seconds of gap. Only shifts clips     */
+/* forward (never pulls them back), so generous gaps you placed by     */
+/* hand stay untouched. Grouped per track ("Bahn"): clips on different */
+/* lanes never affect each other.                                      */
+/* ------------------------------------------------------------------ */
+
+/** `minimum`: gaps of at least pauseSec (clips only move forward). `exact`: every gap is exactly pauseSec. */
+export type PauseMode = 'minimum' | 'exact';
+
+export interface PausePreviewRow {
+	clipId: string;
+	trackId: string;
+	trackName: string;
+	clipLabel: string;
+	oldStart: number;
+	newStart: number;
+	shift: number;
+}
+
+export interface PausePreview {
+	rows: PausePreviewRow[];
+	/** ids that take part (sorted per track), for the scope hint */
+	clipIds: string[];
+	trackCount: number;
+	movedCount: number;
+	totalAdded: number;
+}
+
+/** Short label for preview lists. */
+export function clipLabel(clip: Clip): string {
+	if (clip.type === 'dialogue') {
+		const name = charById(clip.characterId)?.name ?? 'Unassigned';
+		const text = clip.text.replace(/\s+/g, ' ').trim().slice(0, 32);
+		return `${name}${text ? ` — “${text}”` : ''}`;
+	}
+	return clip.name;
+}
+
+/**
+ * Pure preview: where would every given clip land with `pauseSec` gap?
+ * Pass no ids (or <2 ids) to preview over ALL clips. Never mutates state.
+ * `minimum` only pushes clips forward (generous gaps stay); `exact` sets
+ * every gap to exactly `pauseSec` (clips may also move earlier).
+ */
+export function previewPauseGap(
+	pauseSec: number,
+	clipIds?: string[],
+	mode: PauseMode = 'minimum'
+): PausePreview {
+	const pause = Math.max(0, pauseSec);
+	const scope: Set<string> | null =
+		clipIds && clipIds.length >= 2 ? new Set(clipIds) : null;
+	const rows: PausePreviewRow[] = [];
+	const involved = new Set<string>();
+	const trackIds = new Set<string>();
+
+	for (const track of project.tracks) {
+		const sorted = track.clips
+			.filter((c) => !scope || scope.has(c.id))
+			.toSorted((a, b) => a.start - b.start);
+		if (!sorted.length) continue;
+		trackIds.add(track.id);
+		let cursor = -Infinity;
+		let first = true;
+		for (const clip of sorted) {
+			involved.add(clip.id);
+			let next: number;
+			if (first) {
+				next = clip.start;
+				first = false;
+			} else if (mode === 'exact') {
+				next = cursor + pause;
+			} else {
+				next = Math.max(clip.start, cursor + pause);
+			}
+			next = snap(Math.max(0, next));
+			rows.push({
+				clipId: clip.id,
+				trackId: track.id,
+				trackName: track.name || 'Unnamed lane',
+				clipLabel: clipLabel(clip),
+				oldStart: +clip.start.toFixed(2),
+				newStart: next,
+				shift: round2(next - clip.start)
+			});
+			cursor = next + effectiveDuration(clip);
+		}
+	}
+
+	rows.sort((a, b) => a.newStart - b.newStart);
+	const moved = rows.filter((r) => Math.abs(r.shift) > 0.001).length;
+	const totalAdded = round2(rows.reduce((n, r) => n + Math.max(0, r.shift), 0));
+	return {
+		rows,
+		clipIds: [...involved],
+		trackCount: trackIds.size,
+		movedCount: moved,
+		totalAdded
+	};
+}
+
+/**
+ * Apply the pause gap per lane. `minimum` only shifts clips forward,
+ * `exact` sets every gap to exactly `pauseSec` (first clip stays put).
+ * Returns moved clip count.
+ */
+export function applyPauseGap(pauseSec: number, clipIds?: string[], mode: PauseMode = 'minimum'): number {
+	const preview = previewPauseGap(pauseSec, clipIds, mode);
+	clearPausePreview();
+	if (!preview.rows.length) {
+		toast('Nothing to space — no clips in scope');
+		return 0;
+	}
+	for (const row of preview.rows) {
+		if (Math.abs(row.shift) <= 0.001) continue;
+		const clip = clipById(row.clipId);
+		if (clip) clip.start = row.newStart;
+	}
+	persistProjectSoon();
+	if (!preview.movedCount) {
+		toast(
+			mode === 'exact'
+				? `Gaps already exactly ${pauseSec.toFixed(2)}s — nothing moved`
+				: `Gaps already ≥ ${pauseSec.toFixed(2)}s — nothing moved`
+		);
+	} else {
+		toast(
+			`Pause inserted: ${preview.movedCount} clip${preview.movedCount === 1 ? '' : 's'} moved on ${preview.trackCount} lane${preview.trackCount === 1 ? '' : 's'}`
+		);
+	}
+	return preview.movedCount;
+}
+
 /** Render a dialogue clip with Fish Audio and decode it for playback. */
-export async function regenerateClip(clipId: string): Promise<void> {
-	const clip = clipById(clipId);
+export async function regenerateClip(clipId: string): Promise<void> {	const clip = clipById(clipId);
 	if (!clip || clip.type !== 'dialogue' || clip.rendering) return;
 
 	const text = clip.text.trim();
@@ -1299,6 +1506,10 @@ export function stopPlay(freezeAtAudioTime = true) {
 		clearInterval(playTimer);
 		playTimer = null;
 	}
+	if (refreshTimer) {
+		clearTimeout(refreshTimer);
+		refreshTimer = null;
+	}
 	ui.playing = false;
 }
 
@@ -1315,6 +1526,44 @@ export function resetPlayhead() {
 	const wasPlaying = ui.playing;
 	if (wasPlaying) stopPlay();
 	ui.playhead = 0;
+}
+
+let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+/**
+ * Live-update playback after a timeline edit (trim, move, fade, mute,
+ * delete) while playing: debounced transport restart from the current
+ * position, so the fresh schedule (new lengths/positions) takes over
+ * without a manual stop/start. No-op when not playing.
+ */
+export function refreshPlaybackSoon() {
+	if (!ui.playing) return;
+	if (refreshTimer) clearTimeout(refreshTimer);
+	refreshTimer = setTimeout(() => {
+		refreshTimer = null;
+		restartPlaybackAtNow();
+	}, 250);
+}
+
+/** Restart the transport at the current audio-clock position. Retries
+ *  briefly when a previous restart is still in flight (togglePlay's
+ *  `starting` guard would otherwise swallow the restart and leave
+ *  silence). */
+function restartPlaybackAtNow(retries = 0) {
+	if (!ui.playing) return;
+	if (starting) {
+		if (retries < 10) {
+			refreshTimer = setTimeout(() => {
+				refreshTimer = null;
+				restartPlaybackAtNow(retries + 1);
+			}, 100);
+		}
+		return;
+	}
+	try {
+		seek(elapsed());
+	} catch {
+		/* audio context gone — stay stopped */
+	}
 }
 
 /**
@@ -1432,6 +1681,133 @@ function importEffects(names: unknown): AudioEffect[] {
 	return all;
 }
 
+interface BuiltImport {
+	name: string;
+	characters: Character[];
+	tracks: Track[];
+}
+
+/**
+ * Pure conversion of export JSON (pasted import OR the bundled default
+ * project) into internal project data. No side effects — callers decide
+ * what to do with the result (replace the live project, or seed a fresh
+ * one). Structure-only: dialogue/ambience come back unrendered (no audio
+ * bytes in the JSON), sound clips keep their file reference.
+ */
+function buildImportProject(data: Record<string, unknown>): BuiltImport {
+	const characters: Character[] = (data.characters as unknown[]).map((rawC, i) => {
+		const c = (rawC ?? {}) as Record<string, unknown>;
+		const voiceId = importStr(c.voiceId, `fish-voice-imported-${i + 1}`);
+		return {
+			id: importStr(c.id, nextId('char')),
+			name: importStr(c.name, `Character ${i + 1}`),
+			voiceId,
+			language: importStr(c.language, 'English'),
+			voicePreset: undefined,
+			color: importStr(c.color, PALETTE[i % PALETTE.length]),
+			emotion: importStr(c.defaultEmotion ?? c.emotion, 'neutral'),
+			// Avatar stays absent unless the JSON carries one.
+			face:
+				c.face && typeof c.face === 'object' ? (c.face as FaceConfig) : undefined
+		};
+	});
+
+	const tracks: Track[] = (data.tracks as unknown[]).map((rawT, ti) => {
+		const t = (rawT ?? {}) as Record<string, unknown>;
+		const clips: Clip[] = Array.isArray(t.clips)
+			? (t.clips as unknown[]).flatMap((rawC): Clip[] => {
+					const c = (rawC ?? {}) as Record<string, unknown>;
+					const type = c.type === 'dialogue' || c.type === 'ambience' ? c.type : 'sound';
+					const start = importNum(c.start, 0);
+					const fadeIn = importNum(c.fadeIn, 0);
+					const fadeOut = importNum(c.fadeOut, 0);
+					const id = importStr(c.id, nextId('clip'));
+					if (type === 'dialogue') {
+						const clip: DialogueClip = {
+							id,
+							type: 'dialogue',
+							characterId: importStr(c.characterId, ''),
+							text: importStr(c.text, ''),
+							start,
+							fadeIn,
+							fadeOut,
+							rendered: false,
+							rendering: false,
+							duration: null,
+							waveform: [],
+							effects: importEffects(c.effects),
+							renderError: null
+						};
+						return [clip];
+					}
+					if (type === 'ambience') {
+						const layers = Array.isArray(c.layers)
+							? (c.layers as unknown[]).map((rawL, li) => {
+									const l = (rawL ?? {}) as Record<string, unknown>;
+									const volume =
+										typeof l.volume === 'number' && Number.isFinite(l.volume)
+											? Math.max(0, Math.min(1, l.volume))
+											: 0.5;
+									return {
+										id: importStr(l.id, `ambience-imported-${li}`),
+										name: importStr(l.name, `Layer ${li + 1}`),
+										icon: importStr(l.icon, 'graphic_eq'),
+										file: importStr(l.file, ''),
+										volume,
+										enabled: l.enabled !== false && volume > 0
+									};
+								})
+							: [];
+						const clip: AmbienceClip = {
+							id,
+							type: 'ambience',
+							name: importStr(c.name, 'Ambience Atmosphere'),
+							icon: importStr(c.icon, 'filter_drama'),
+							duration: importNum(c.duration, 10, 0.3),
+							start,
+							fadeIn,
+							fadeOut,
+							rendered: false,
+							rendering: false,
+							waveform: [],
+							layers,
+							effects: importEffects(c.effects)
+						};
+						return [clip];
+					}
+					const fileRef = typeof c.file === 'string' && c.file ? c.file : undefined;
+					const clip: SoundClip = {
+						id,
+						type: 'sound',
+						name: importStr(c.name, 'Sound Effect'),
+						icon: importStr(c.icon, 'volume_up'),
+						duration: importNum(c.duration, 2, 0.2),
+						start,
+						fadeIn,
+						fadeOut,
+						rendered: true,
+						rendering: false,
+						// Waveform returns once the referenced audio resolves
+						// (same-browser cache) — otherwise it stays empty.
+						waveform: [],
+						file: fileRef,
+						effects: importEffects(c.effects)
+					};
+					return [clip];
+				})
+			: [];
+		return {
+			id: importStr(t.id, nextId('track')),
+			name: importStr(t.name, `Lane ${ti + 1}`),
+			muted: t.muted === true,
+			clips
+		};
+	});
+
+	if (!tracks.length) throw new Error('The export contains no lanes.');
+	return { name: importStr(data.project, 'Imported Project'), characters, tracks };
+}
+
 /**
  * Load a project from pasted export JSON, replacing the current project.
  * Structure-only: clips come back unrendered (no audio in the JSON) and any
@@ -1453,116 +1829,8 @@ export function importProject(raw: string): ImportResult {
 	}
 
 	try {
-		const characters: Character[] = (data.characters as unknown[]).map((rawC, i) => {
-			const c = (rawC ?? {}) as Record<string, unknown>;
-			const voiceId = importStr(c.voiceId, `fish-voice-imported-${i + 1}`);
-			return {
-				id: importStr(c.id, nextId('char')),
-				name: importStr(c.name, `Character ${i + 1}`),
-				voiceId,
-				language: importStr(c.language, 'English'),
-				voicePreset: undefined,
-				color: importStr(c.color, PALETTE[i % PALETTE.length]),
-				emotion: importStr(c.defaultEmotion ?? c.emotion, 'neutral'),
-				// Avatar stays absent unless the JSON carries one.
-				face:
-					c.face && typeof c.face === 'object' ? (c.face as FaceConfig) : undefined
-			};
-		});
-
-		const tracks: Track[] = (data.tracks as unknown[]).map((rawT, ti) => {
-			const t = (rawT ?? {}) as Record<string, unknown>;
-			const clips: Clip[] = Array.isArray(t.clips)
-				? (t.clips as unknown[]).flatMap((rawC): Clip[] => {
-						const c = (rawC ?? {}) as Record<string, unknown>;
-						const type = c.type === 'dialogue' || c.type === 'ambience' ? c.type : 'sound';
-						const start = importNum(c.start, 0);
-						const fadeIn = importNum(c.fadeIn, 0);
-						const fadeOut = importNum(c.fadeOut, 0);
-						const id = importStr(c.id, nextId('clip'));
-						if (type === 'dialogue') {
-							const clip: DialogueClip = {
-								id,
-								type: 'dialogue',
-								characterId: importStr(c.characterId, ''),
-								text: importStr(c.text, ''),
-								start,
-								fadeIn,
-								fadeOut,
-								rendered: false,
-								rendering: false,
-								duration: null,
-								waveform: [],
-								effects: importEffects(c.effects),
-								renderError: null
-							};
-							return [clip];
-						}
-						if (type === 'ambience') {
-							const layers = Array.isArray(c.layers)
-								? (c.layers as unknown[]).map((rawL, li) => {
-										const l = (rawL ?? {}) as Record<string, unknown>;
-										const volume =
-											typeof l.volume === 'number' && Number.isFinite(l.volume)
-												? Math.max(0, Math.min(1, l.volume))
-												: 0.5;
-										return {
-											id: importStr(l.id, `ambience-imported-${li}`),
-											name: importStr(l.name, `Layer ${li + 1}`),
-											icon: importStr(l.icon, 'graphic_eq'),
-											file: importStr(l.file, ''),
-											volume,
-											enabled: l.enabled !== false && volume > 0
-										};
-									})
-								: [];
-							const clip: AmbienceClip = {
-								id,
-								type: 'ambience',
-								name: importStr(c.name, 'Ambience Atmosphere'),
-								icon: importStr(c.icon, 'filter_drama'),
-								duration: importNum(c.duration, 10, 0.3),
-								start,
-								fadeIn,
-								fadeOut,
-								rendered: false,
-								rendering: false,
-								waveform: [],
-								layers,
-								effects: importEffects(c.effects)
-							};
-							return [clip];
-						}
-						const fileRef = typeof c.file === 'string' && c.file ? c.file : undefined;
-						const clip: SoundClip = {
-							id,
-							type: 'sound',
-							name: importStr(c.name, 'Sound Effect'),
-							icon: importStr(c.icon, 'volume_up'),
-							duration: importNum(c.duration, 2, 0.2),
-							start,
-							fadeIn,
-							fadeOut,
-							rendered: true,
-							rendering: false,
-							// Waveform returns once the referenced audio resolves
-							// (same-browser cache) — otherwise it stays empty.
-							waveform: [],
-							file: fileRef,
-							effects: importEffects(c.effects)
-						};
-						return [clip];
-					})
-				: [];
-			return {
-				id: importStr(t.id, nextId('track')),
-				name: importStr(t.name, `Lane ${ti + 1}`),
-				muted: t.muted === true,
-				clips
-			};
-		});
-
-		if (!tracks.length) return { ok: false, error: 'The export contains no lanes.' };
+		const built = buildImportProject(data);
+		const { characters, tracks } = built;
 
 		// Drop the replaced project's audio (memory + persisted renders).
 		stopPlay();
@@ -1575,7 +1843,7 @@ export function importProject(raw: string): ImportResult {
 		}
 
 		const incoming: Project = {
-			name: importStr(data.project, 'Imported Project'),
+			name: built.name,
 			characters,
 			tracks
 		};
@@ -1586,6 +1854,7 @@ export function importProject(raw: string): ImportResult {
 		project.tracks = incoming.tracks;
 
 		ui.selectedClipId = null;
+		ui.selectedClipIds = [];
 		ui.editingClipId = null;
 		ui.fxClipId = null;
 		ui.playhead = 0;

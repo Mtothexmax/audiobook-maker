@@ -2,7 +2,7 @@ https://mtothexmax.github.io/audiobook-maker/
 
 
 
-# Audiobook Studio — Svelte
+# Audiobook Maker — Svelte
 
 Dark-theme Audiobook-Editor mit **echter Fish-Audio-TTS-Generierung** und
 Web-Audio-Wiedergabe, gebaut mit **Svelte 5 (runes)** + Tailwind CSS 4 +

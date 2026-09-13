@@ -7,6 +7,7 @@
 		snap,
 		addSoundClip,
 		addCategoryClip,
+		clearClipSelection,
 		type SoundPreset,
 		type SoundCategory
 	} from '$lib/project.svelte';
@@ -61,7 +62,10 @@
 
 	function onLaneMouseDown(e: MouseEvent) {
 		if (e.target === e.currentTarget) {
-			ui.selectedClipId = null;
+			// With Shift/Ctrl held the timeline starts an additive rubber-band
+			// select — keep the existing selection in that case.
+			if (e.shiftKey || e.ctrlKey || e.metaKey) return;
+			clearClipSelection();
 			ui.editingClipId = null;
 			ui.fxClipId = null;
 		}

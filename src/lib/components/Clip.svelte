@@ -13,6 +13,11 @@
 		clipEffects,
 		deleteClip,
 		duplicateClip,
+		isClipSelected,
+		selectClipExclusive,
+		toggleClipSelected,
+		previewStarts,
+		refreshPlaybackSoon,
 		VOICE_PRESETS
 	} from '$lib/project.svelte';
 	import { renderTagged, countTags } from '$lib/tags';
@@ -26,7 +31,12 @@
 
 	const effDur = $derived(effectiveDuration(clip));
 	const wPx = $derived(Math.max(28, effDur * zoom));
-	const isSelected = $derived(ui.selectedClipId === clip.id);
+	const isSelected = $derived(isClipSelected(clip.id));
+	/** Live pause-preview position (Insert-pause dialog) — falls back to the real start. */
+	const shownStart = $derived(previewStarts[clip.id] ?? clip.start);
+	const previewShifted = $derived(
+		previewStarts[clip.id] !== undefined && Math.abs(previewStarts[clip.id] - clip.start) > 0.001
+	);
 	const character = $derived(clip.type === 'dialogue' ? charById(clip.characterId) : undefined);
 	/**
 	 * Unrendered dialogue clips have unknown length → cannot be trimmed/faded yet.
@@ -84,7 +94,7 @@
 		if (mode !== 'move' && !interactive) return;
 		e.preventDefault();
 		e.stopPropagation();
-		select();
+		select(e);
 		drag = {
 			mode,
 			startX: e.clientX,
@@ -148,6 +158,8 @@
 			const maxFade = drag.origDur / 2;
 			clip.fadeOut = Math.max(0, Math.min(maxFade, +(drag.origFadeOut - dt).toFixed(2)));
 		}
+		// Audition the edit live when playing (debounced transport refresh).
+		refreshPlaybackSoon();
 	}
 
 	function onWindowUp() {
@@ -174,18 +186,17 @@
 		}
 	});
 
-	function select() {
-		ui.selectedClipId = clip.id;
-		// If the bottom drawer is already open, it follows a single-click
-		// selection (it only needs a double-click to open from closed).
-		if (ui.editingClipId && ui.editingClipId !== clip.id) {
-			ui.editingClipId = clip.id;
-			ui.fxClipId = null;
+	function select(e?: MouseEvent) {
+		// Ctrl/Cmd+click toggles multi-selection for batch tools (e.g. Insert pause).
+		if (e && (e.ctrlKey || e.metaKey)) {
+			toggleClipSelected(clip.id);
+			return;
 		}
+		selectClipExclusive(clip.id);
 	}
 
 	function openEditor() {
-		ui.selectedClipId = clip.id;
+		selectClipExclusive(clip.id);
 		ui.editingClipId = clip.id;
 		ui.fxClipId = null;
 	}
@@ -193,7 +204,7 @@
 	/** Open the clip's FX menu in the bottom drawer. */
 	function openFx(e: MouseEvent) {
 		e.stopPropagation();
-		ui.selectedClipId = clip.id;
+		selectClipExclusive(clip.id);
 		ui.editingClipId = clip.id;
 		ui.fxClipId = clip.id;
 	}
@@ -228,7 +239,7 @@
 	function onContextMenu(e: MouseEvent) {
 		e.preventDefault();
 		e.stopPropagation();
-		ui.selectedClipId = clip.id;
+		if (!isClipSelected(clip.id)) selectClipExclusive(clip.id);
 		showContextMenu = true;
 		contextMenuPos = { x: e.clientX, y: e.clientY };
 	}
@@ -273,20 +284,21 @@
 
 <div
 	class="absolute"
-	style="left: {clip.start * zoom}px; width: {wPx}px; top: 8px; bottom: 8px;"
+	style="left: {shownStart * zoom}px; width: {wPx}px; top: 8px; bottom: 8px;"
 	data-clip-id={clip.id}
 >
 	<!-- clip body -->
 	<div
 		class="group absolute inset-0 cursor-grab select-none overflow-hidden rounded-lg border active:cursor-grabbing"
-		class:ring-2={isSelected}
+		class:ring-2={isSelected || previewShifted}
 		class:ring-violet-400={isSelected}
+		class:ring-cyan-300={previewShifted && !isSelected}
 		class:opacity-40={muted}
 		style="background: {bg}; border-color: {borderColor}; border-style: {borderStyle};"
 		onmousedown={(e) => onHandleDown(e, 'move')}
 		onclick={(e) => {
 			e.stopPropagation();
-			select();
+			select(e);
 		}}
 		ondblclick={(e) => {
 			e.stopPropagation();

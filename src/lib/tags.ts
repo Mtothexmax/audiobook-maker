@@ -17,6 +17,26 @@ export const EMOTIONS = [
 	'dramatic'
 ];
 
+/** Distinct Material Symbol per emotion (no more one-mask-fits-all). */
+export const EMOTION_ICONS: Record<string, string> = {
+	happy: 'sentiment_satisfied',
+	sad: 'sentiment_dissatisfied',
+	angry: 'sentiment_very_dissatisfied',
+	calm: 'sentiment_neutral',
+	whisper: 'mic',
+	excited: 'celebration',
+	fearful: 'sentiment_worried',
+	surprised: 'bolt',
+	sarcastic: 'sentiment_very_satisfied',
+	tender: 'favorite',
+	dramatic: 'theater_comedy'
+};
+
+/** Icon for an emotion name (e.g. from `[emotion:whisper]`); masks as fallback. */
+export function emotionIcon(name: string): string {
+	return EMOTION_ICONS[name.trim().toLowerCase()] ?? 'theater_comedy';
+}
+
 export type TagKind = 'emotion' | 'pause' | 'emphasis' | 'speed' | 'other';
 
 export function tagKind(content: string): TagKind {
@@ -78,7 +98,9 @@ export function renderTagged(text: string, truncate?: number): string {
 					? 'priority_high'
 					: kind === 'speed'
 						? 'speed'
-						: 'theater_comedy';
+						: kind === 'emotion'
+							? emotionIcon(p1.split(':').slice(1).join(':'))
+							: 'theater_comedy';
 		return `<span class="inline-flex items-center gap-0.5 rounded-full border px-1.5 py-px text-[10px] font-medium whitespace-nowrap ${cls}">
 			<span class="material-symbols-rounded text-[11px]">${icon}</span>${p1}</span>`;
 	});

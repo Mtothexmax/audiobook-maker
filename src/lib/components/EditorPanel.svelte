@@ -19,7 +19,7 @@
 		VOICE_PRESETS
 	} from '$lib/project.svelte';
 	import type { EffectParam } from '$lib/types';
-	import { EMOTIONS, renderTagged, countTags } from '$lib/tags';
+	import { EMOTIONS, emotionIcon, renderTagged } from '$lib/tags';
 	import {
 		getBuffer,
 		previewBuffer,
@@ -150,6 +150,26 @@
 		if (clipHasAudio(clip.id)) invalidateRender(clip.id);
 		clip.text = next;
 	}
+
+	/* Unified script editor: a highlight backdrop (looks like the preview)
+	   behind a transparent real textarea — select-all/copy therefore keeps
+	   the raw [bracket] syntax natively. */
+	let backdropInner = $state<HTMLElement | undefined>(undefined);
+
+	/** Keep the highlight backdrop aligned with the transparent textarea. */
+	function syncScriptScroll() {
+		if (ta && backdropInner) {
+			backdropInner.style.transform = `translateY(${-ta.scrollTop}px)`;
+		}
+	}
+
+	// The textarea element is reused across clips — reset scroll on switch.
+	const editingId = $derived(ui.editingClipId);
+	$effect(() => {
+		void editingId;
+		if (ta) ta.scrollTop = 0;
+		if (backdropInner) backdropInner.style.transform = '';
+	});
 
 	onDestroy(() => {
 		stopPreview();
@@ -514,14 +534,34 @@
 					<div class="mb-2 text-[10px] uppercase tracking-widest text-gray-500">
 						Script + Fish Audio controls
 					</div>
-					<textarea
-						bind:this={ta}
-						value={clip.text}
-						oninput={onTextInput}
-						rows={6}
-						class="scrollbar h-36 w-full resize-none rounded-xl border border-white/10 bg-[#0e131b] p-3 font-mono text-sm leading-6 text-gray-200 outline-none focus:border-violet-500/60"
-						placeholder="Write the line... use [emotion:x], [pause:x], [emphasis], [speed:x]"
-					></textarea>
+					<!-- unified script editor: looks like the highlighted preview, but is a
+					     real textarea underneath — select-all/copy keeps [brackets] -->
+					<div class="relative">
+						<div
+							aria-hidden="true"
+							class="pointer-events-none absolute inset-0 overflow-hidden rounded-xl border border-white/10 bg-[#0e131b] p-3 font-mono text-sm leading-6 text-gray-200 select-none"
+						>
+							<div
+								bind:this={backdropInner}
+								class="whitespace-pre-wrap break-words will-change-transform"
+							>
+								{@html renderTagged(clip.text)}
+							</div>
+						</div>
+						<textarea
+							bind:this={ta}
+							value={clip.text}
+							oninput={(e) => {
+								onTextInput(e);
+								syncScriptScroll();
+							}}
+							onscroll={syncScriptScroll}
+							rows={6}
+							spellcheck={false}
+							class="relative block h-36 w-full resize-none overflow-y-auto rounded-xl border border-transparent bg-transparent p-3 font-mono text-sm leading-6 text-transparent caret-violet-300 outline-none selection:bg-violet-500/40 placeholder:text-gray-600 focus:border-violet-500/60"
+							placeholder="Write the line... use [emotion:x], [pause:x], [emphasis], [speed:x]"
+						></textarea>
+					</div>
 
 					{#if clip.renderError}
 						<div
@@ -556,30 +596,9 @@
 								class="flex items-center gap-1 rounded border border-violet-500/20 bg-violet-500/10 px-2 py-1 font-medium text-violet-300 transition hover:bg-violet-500/20"
 								onclick={() => insertTag(`[emotion:${em}]`)}
 							>
-								<span class="material-symbols-rounded text-xs">theater_comedy</span>{em}
+								<span class="material-symbols-rounded text-xs">{emotionIcon(em)}</span>{em}
 							</button>
 						{/each}
-					</div>
-
-					<!-- highlighted preview -->
-					<div class="mt-3">
-						<div class="mb-1 text-[10px] uppercase tracking-widest text-gray-500">
-							Preview — Fish Audio directives highlighted
-							{#if countTags(clip.text) > 0}
-								<span class="ml-1 normal-case text-violet-400">({countTags(clip.text)} directives)</span>
-							{/if}
-						</div>
-						<div
-							class="min-h-[42px] rounded-lg border border-white/10 bg-[#0e131b] p-2.5 text-xs leading-relaxed text-gray-300"
-						>
-							{#if clip.text.trim()}
-								{@html renderTagged(clip.text)}
-							{:else}
-								<span class="italic text-gray-600"
-									>Nothing written yet — insert a pause, emotion or emphasis above.</span
-								>
-							{/if}
-						</div>
 					</div>
 				{:else if clip.type === 'ambience'}
 					<!-- AMBIENCE MIXER -->

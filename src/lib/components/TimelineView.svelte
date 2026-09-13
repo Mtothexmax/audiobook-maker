@@ -12,6 +12,8 @@
 		stopPlay,
 		clipHasAudio,
 		deleteClip,
+		clearClipSelection,
+		setSelectedClipIds,
 		type SoundCategory
 	} from '$lib/project.svelte';
 	import { onDestroy } from 'svelte';
@@ -28,6 +30,9 @@
 		if (!browser) return;
 		window.removeEventListener('mousemove', onPanMove);
 		window.removeEventListener('mouseup', onPanUp);
+		window.removeEventListener('mousemove', onMarqueeMove);
+		window.removeEventListener('mouseup', onMarqueeUp);
+		stopMarqueeAutoscroll();
 	});
 
 	let renderingAll = $state(false);
@@ -81,16 +86,12 @@
 		seek(Math.max(0, (e.clientX - rect.left) / ui.zoom));
 	}
 
-	/* drag-to-pan the timeline (grab empty space to scroll left/right) */
+	/* drag-to-pan the timeline (middle mouse button, or left-drag outside lane bodies) */
 	let panning = $state(false);
 	let suppressPanClick = false;
 	const pan = { active: false, x: 0, y: 0, left: 0, top: 0, el: null as HTMLElement | null };
 
-	function onPanDown(e: MouseEvent) {
-		if (e.button !== 0) return;
-		const t = e.target as HTMLElement;
-		// Clips, controls and the ruler keep their own gestures — pan everywhere else.
-		if (t.closest('[data-clip-id], button, input, select, textarea, a, [data-ruler]')) return;
+	function startPan(e: MouseEvent) {
 		const el = e.currentTarget as HTMLElement;
 		pan.active = true;
 		pan.x = e.clientX;
@@ -98,7 +99,6 @@
 		pan.left = el.scrollLeft;
 		pan.top = el.scrollTop;
 		pan.el = el;
-		e.preventDefault();
 		window.addEventListener('mousemove', onPanMove);
 		window.addEventListener('mouseup', onPanUp);
 	}
@@ -122,6 +122,173 @@
 		panning = false;
 	}
 
+	/* ------------------------------------------------------------------ */
+	/* rubber-band select: drag empty lane space to select every clip the  */
+	/* rectangle touches — across all lanes. Shift/Ctrl/Cmd adds to the    */
+	/* existing selection instead of replacing it.                         */
+	/* ------------------------------------------------------------------ */
+
+	const MARQUEE_THRESHOLD = 4;
+
+	let scrollEl: HTMLElement | null = null;
+	let contentEl: HTMLElement | null = null;
+	const marquee = $state({ active: false, moved: false, x0: 0, y0: 0, x1: 0, y1: 0 });
+	/** marquee corners in client coords (for hit-testing clip boxes) */
+	let mqClient = { x0: 0, y0: 0, x1: 0, y1: 0 };
+	let mqAdditive = false;
+	/** selection before the drag started (kept when additive) */
+	let mqBaseIds: string[] = [];
+	let mqLastClient = { x: 0, y: 0 };
+	let mqScrollTimer: ReturnType<typeof setInterval> | null = null;
+
+	const marqueeBox = $derived({
+		left: Math.min(marquee.x0, marquee.x1),
+		top: Math.min(marquee.y0, marquee.y1),
+		width: Math.abs(marquee.x1 - marquee.x0),
+		height: Math.abs(marquee.y1 - marquee.y0)
+	});
+
+	function stopMarqueeAutoscroll() {
+		if (mqScrollTimer) {
+			clearInterval(mqScrollTimer);
+			mqScrollTimer = null;
+		}
+	}
+
+	function toContent(clientX: number, clientY: number): { x: number; y: number } | null {
+		if (!contentEl) return null;
+		const r = contentEl.getBoundingClientRect();
+		return { x: clientX - r.left, y: clientY - r.top };
+	}
+
+	function clampToContent(p: { x: number; y: number }): { x: number; y: number } {
+		if (!contentEl) return p;
+		const r = contentEl.getBoundingClientRect();
+		return {
+			x: Math.max(0, Math.min(p.x, r.width)),
+			y: Math.max(0, Math.min(p.y, r.height))
+		};
+	}
+
+	/** Every clip whose box intersects the marquee rectangle (any lane). */
+	function marqueeHits(): string[] {
+		const x0 = Math.min(mqClient.x0, mqClient.x1);
+		const x1 = Math.max(mqClient.x0, mqClient.x1);
+		const y0 = Math.min(mqClient.y0, mqClient.y1);
+		const y1 = Math.max(mqClient.y0, mqClient.y1);
+		const out: string[] = [];
+		scrollEl?.querySelectorAll('[data-clip-id]').forEach((node) => {
+			const el = node as HTMLElement;
+			const id = el.dataset.clipId;
+			if (!id) return;
+			const r = el.getBoundingClientRect();
+			if (r.left < x1 && r.right > x0 && r.top < y1 && r.bottom > y0) out.push(id);
+		});
+		return out;
+	}
+
+	function updateMarqueeFromClient(clientX: number, clientY: number) {
+		mqLastClient = { x: clientX, y: clientY };
+		mqClient.x1 = clientX;
+		mqClient.y1 = clientY;
+		const p = toContent(clientX, clientY);
+		if (p) {
+			const c = clampToContent(p);
+			marquee.x1 = c.x;
+			marquee.y1 = c.y;
+		}
+		if (!marquee.moved && Math.hypot(clientX - mqClient.x0, clientY - mqClient.y0) > MARQUEE_THRESHOLD) {
+			marquee.moved = true;
+		}
+		if (marquee.moved) {
+			const hits = marqueeHits();
+			setSelectedClipIds(mqAdditive ? [...mqBaseIds, ...hits] : hits);
+		}
+	}
+
+	function startMarqueeAutoscroll() {
+		stopMarqueeAutoscroll();
+		if (!browser) return;
+		mqScrollTimer = setInterval(() => {
+			if (!marquee.active || !scrollEl) return;
+			const r = scrollEl.getBoundingClientRect();
+			const MARGIN = 28;
+			const STEP = 18;
+			let dx = 0;
+			let dy = 0;
+			if (mqLastClient.x < r.left + MARGIN) dx = -STEP;
+			else if (mqLastClient.x > r.right - MARGIN) dx = STEP;
+			if (mqLastClient.y < r.top + MARGIN) dy = -STEP;
+			else if (mqLastClient.y > r.bottom - MARGIN) dy = STEP;
+			if (dx || dy) {
+				scrollEl.scrollLeft += dx;
+				scrollEl.scrollTop += dy;
+				updateMarqueeFromClient(mqLastClient.x, mqLastClient.y);
+			}
+		}, 40);
+	}
+
+	/**
+	 * Start a rubber-band select. Returns false when the press belongs to
+	 * someone else (clip drag, button, ruler seek, lane header, ...).
+	 */
+	function onMarqueeDown(e: MouseEvent): boolean {
+		const t = e.target as HTMLElement;
+		// Clips, controls and the ruler keep their own gestures.
+		if (t.closest('[data-clip-id], button, input, select, textarea, a, [data-ruler]')) return false;
+		// Only on lane bodies — the header gutter keeps its own behavior.
+		if (!t.closest('[data-lane-id]')) return false;
+		if (!browser) return false;
+		e.preventDefault();
+		mqAdditive = e.shiftKey || e.ctrlKey || e.metaKey;
+		mqBaseIds = mqAdditive ? [...ui.selectedClipIds] : [];
+		// (Lane already cleared plain clicks on mousedown — harmless to repeat.)
+		if (!mqAdditive) clearClipSelection();
+		mqClient = { x0: e.clientX, y0: e.clientY, x1: e.clientX, y1: e.clientY };
+		mqLastClient = { x: e.clientX, y: e.clientY };
+		const p = toContent(e.clientX, e.clientY);
+		const c = p ? clampToContent(p) : { x: 0, y: 0 };
+		marquee.x0 = marquee.x1 = c.x;
+		marquee.y0 = marquee.y1 = c.y;
+		marquee.moved = false;
+		marquee.active = true;
+		window.addEventListener('mousemove', onMarqueeMove);
+		window.addEventListener('mouseup', onMarqueeUp);
+		startMarqueeAutoscroll();
+		return true;
+	}
+
+	function onMarqueeMove(e: MouseEvent) {
+		if (!marquee.active) return;
+		e.preventDefault();
+		updateMarqueeFromClient(e.clientX, e.clientY);
+	}
+
+	function onMarqueeUp() {
+		window.removeEventListener('mousemove', onMarqueeMove);
+		window.removeEventListener('mouseup', onMarqueeUp);
+		stopMarqueeAutoscroll();
+		marquee.active = false;
+		marquee.moved = false;
+	}
+
+	/** Left = rubber-band on lanes (pan only outside lane bodies), middle = pan. */
+	function onTimelineMouseDown(e: MouseEvent) {
+		const t = e.target as HTMLElement;
+		if (e.button === 1) {
+			if (t.closest('[data-clip-id], button, input, select, textarea, a')) return;
+			e.preventDefault();
+			startPan(e);
+			return;
+		}
+		if (e.button !== 0) return;
+		if (onMarqueeDown(e)) return;
+		// Left-drag outside lane bodies (e.g. the lane header gutter) still pans.
+		if (t.closest('[data-clip-id], button, input, select, textarea, a, [data-ruler]')) return;
+		e.preventDefault();
+		startPan(e);
+	}
+
 	/* Swallow the ruler seek click when a pan gesture just ended on it. */
 	function onPanClickCapture(e: MouseEvent) {
 		if (!suppressPanClick) return;
@@ -139,7 +306,7 @@
 		const cursorX = e.clientX - rect.left;
 		const timeAtCursor = Math.max(0, (cursorX + el.scrollLeft - GUTTER) / ui.zoom);
 		const factor = e.deltaY > 0 ? 1 / 1.15 : 1.15;
-		const next = Math.max(20, Math.min(240, Math.round(ui.zoom * factor)));
+		const next = Math.max(5, Math.min(240, Math.round(ui.zoom * factor)));
 		if (next === ui.zoom) return;
 		ui.zoom = next;
 		const targetLeft = Math.max(0, timeAtCursor * next + GUTTER - cursorX);
@@ -159,11 +326,13 @@
 			e.preventDefault();
 			void togglePlay();
 		}
-		// Delete/Backspace to delete selected clip
+		// Delete/Backspace deletes the selected clip(s)
 		if ((e.code === 'Delete' || e.code === 'Backspace') && ui.selectedClipId) {
 			e.preventDefault();
-			deleteClip(ui.selectedClipId);
+			const ids = ui.selectedClipIds.length ? [...ui.selectedClipIds] : [ui.selectedClipId];
+			for (const id of ids) deleteClip(id);
 			ui.selectedClipId = null;
+			ui.selectedClipIds = [];
 			ui.editingClipId = null;
 			ui.fxClipId = null;
 		}
@@ -229,15 +398,15 @@
 			<button
 				class="flex h-8 w-8 items-center justify-center rounded text-gray-400 hover:bg-white/5 hover:text-white"
 				title="Zoom out"
-				onclick={() => (ui.zoom = Math.max(20, Math.round(ui.zoom / 1.25)))}
+				onclick={() => (ui.zoom = Math.max(5, Math.round(ui.zoom / 1.25)))}
 			>
 				<span class="material-symbols-rounded text-base">zoom_out</span>
 			</button>
 			<input
 				type="range"
-				min="20"
+				min="5"
 				max="240"
-				step="10"
+				step="5"
 				bind:value={ui.zoom}
 				class="w-28 cursor-pointer"
 				title="Timeline zoom (px per second)"
@@ -321,12 +490,17 @@
 
 		<!-- timeline -->
 		<div
-			class="scrollbar min-w-0 flex-1 overflow-auto bg-[#0d121a] {panning ? 'cursor-grabbing select-none' : 'cursor-grab'}"
+			bind:this={scrollEl}
+			class="scrollbar min-w-0 flex-1 overflow-auto bg-[#0d121a] {panning
+				? 'cursor-grabbing select-none'
+				: marquee.active
+					? 'cursor-crosshair select-none'
+					: ''}"
 			onwheel={onWheel}
-			onmousedown={onPanDown}
+			onmousedown={onTimelineMouseDown}
 			onclickcapture={onPanClickCapture}
 		>
-			<div class="relative" style="width: {GUTTER + total * ui.zoom}px">
+			<div bind:this={contentEl} class="relative" style="width: {GUTTER + total * ui.zoom}px">
 				<!-- ruler -->
 				<div class="sticky top-0 z-30 flex w-full">
 					<div
@@ -358,6 +532,14 @@
 				{#each project.tracks as track (track.id)}
 					<Lane {track} zoom={ui.zoom} gridStep={step * ui.zoom} />
 				{/each}
+
+				<!-- rubber-band selection rectangle -->
+				{#if marquee.active && marquee.moved}
+					<div
+						class="pointer-events-none absolute z-10 border border-cyan-300/80 bg-cyan-400/15"
+						style="left: {marqueeBox.left}px; top: {marqueeBox.top}px; width: {marqueeBox.width}px; height: {marqueeBox.height}px;"
+					></div>
+				{/if}
 
 				<!-- playhead -->
 				<div

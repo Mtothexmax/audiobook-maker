@@ -5,6 +5,8 @@
 	let showImport = $state(false);
 	let importText = $state('');
 	let importError = $state<string | null>(null);
+	let clipboardNote = $state<string | null>(null);
+	let readingClipboard = $state(false);
 	let exportingMp3 = $state(false);
 
 	function loadJson() {
@@ -13,9 +15,52 @@
 			showImport = false;
 			importText = '';
 			importError = null;
+			clipboardNote = null;
 		} else {
 			importError = result.error;
 		}
+	}
+
+	function looksLikeProjectExport(text: string): boolean {
+		try {
+			const data = JSON.parse(text) as Record<string, unknown>;
+			return Array.isArray(data.tracks) && Array.isArray(data.characters);
+		} catch {
+			return false;
+		}
+	}
+
+	/** Open the import panel, prefilled with the clipboard when it holds text. */
+	async function openImport() {
+		if (readingClipboard) return;
+		readingClipboard = true;
+		importError = null;
+		clipboardNote = null;
+		try {
+			const text = await navigator.clipboard.readText();
+			if (text && text.trim()) {
+				importText = text;
+				clipboardNote = looksLikeProjectExport(text)
+					? 'Taken from your clipboard — press “Load project” to apply it.'
+					: 'Clipboard pasted, but it doesn’t look like a project export.';
+			} else {
+				importText = '';
+				clipboardNote = 'Clipboard is empty — paste the JSON manually.';
+			}
+		} catch {
+			importText = '';
+			clipboardNote = 'Could not read the clipboard (browser permission) — paste the JSON manually.';
+		} finally {
+			readingClipboard = false;
+		}
+		showImport = true;
+	}
+
+	function closeImport() {
+		showImport = false;
+		importText = '';
+		importError = null;
+		clipboardNote = null;
 	}
 
 	function copyJson() {
@@ -92,10 +137,10 @@
 				<button
 					class="flex items-center gap-1.5 rounded-lg border border-white/10 bg-[#171c27] px-3 py-1.5 text-xs font-medium text-gray-200 transition hover:bg-[#202635]"
 					onclick={() => {
-						showImport = !showImport;
-						importError = null;
+						if (showImport) closeImport();
+						else void openImport();
 					}}
-					title="Paste a previously exported project JSON to load it"
+					title="Load a project JSON — takes it straight from your clipboard when present"
 				>
 					<span class="material-symbols-rounded text-sm">upload</span>
 					Import JSON
@@ -122,6 +167,14 @@
 				<div class="mb-2 text-[10px] uppercase tracking-widest text-gray-500">
 					Paste project JSON to load it (replaces the current project)
 				</div>
+				{#if clipboardNote}
+					<div
+						class="mb-2 flex items-start gap-1.5 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-2.5 py-2 text-[11px] leading-snug text-cyan-200"
+					>
+						<span class="material-symbols-rounded text-sm">content_paste</span>
+						<span>{clipboardNote}</span>
+					</div>
+				{/if}
 				<textarea
 					bind:value={importText}
 					rows={5}
@@ -140,11 +193,7 @@
 				<div class="mt-2 flex justify-end gap-2">
 					<button
 						class="rounded-lg border border-white/10 bg-[#202635] px-3 py-1.5 text-xs font-medium text-gray-200 transition hover:bg-[#262b36]"
-						onclick={() => {
-							showImport = false;
-							importText = '';
-							importError = null;
-						}}
+						onclick={closeImport}
 					>
 						Cancel
 					</button>
