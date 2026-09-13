@@ -1,5 +1,12 @@
 <script lang="ts">
-	import { project, buildExport, importProject, exportTimelineMp3, toast } from '$lib/project.svelte';
+	import {
+		project,
+		buildExport,
+		importProject,
+		exportTimelineMp3,
+		toast,
+		type ImportMode
+	} from '$lib/project.svelte';
 
 	let copied = $state(false);
 	let showImport = $state(false);
@@ -9,13 +16,10 @@
 	let readingClipboard = $state(false);
 	let exportingMp3 = $state(false);
 
-	function loadJson() {
-		const result = importProject(importText);
+	function submitImport(mode: ImportMode) {
+		const result = importProject(importText, mode);
 		if (result.ok) {
-			showImport = false;
-			importText = '';
-			importError = null;
-			clipboardNote = null;
+			closeImport();
 		} else {
 			importError = result.error;
 		}
@@ -165,7 +169,7 @@
 		{#if showImport}
 			<div class="mb-4 shrink-0 rounded-xl border border-white/10 bg-[#0e131b] p-4">
 				<div class="mb-2 text-[10px] uppercase tracking-widest text-gray-500">
-					Paste project JSON to load it (replaces the current project)
+					Paste project JSON — replace the project, or add it as new lanes
 				</div>
 				{#if clipboardNote}
 					<div
@@ -198,11 +202,20 @@
 						Cancel
 					</button>
 					<button
+						class="rounded-lg border border-white/10 bg-[#202635] px-3 py-1.5 text-xs font-medium text-gray-200 transition hover:bg-[#262b36] disabled:opacity-40"
+						disabled={!importText.trim()}
+						onclick={() => submitImport('replace')}
+						title="Replace the current project with this JSON (current clips and audio are dropped)"
+					>
+						Replace project
+					</button>
+					<button
 						class="rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-violet-500 disabled:opacity-50"
 						disabled={!importText.trim()}
-						onclick={loadJson}
+						onclick={() => submitImport('add')}
+						title="Append this JSON as new lanes — current clips, rendered audio and characters stay"
 					>
-						Load project
+						Add to project
 					</button>
 				</div>
 			</div>

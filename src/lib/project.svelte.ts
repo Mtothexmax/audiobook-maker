@@ -1809,11 +1809,84 @@ function buildImportProject(data: Record<string, unknown>): BuiltImport {
 }
 
 /**
- * Load a project from pasted export JSON, replacing the current project.
- * Structure-only: clips come back unrendered (no audio in the JSON) and any
- * in-memory/cached audio of the replaced project is dropped.
+ * Append an import after the existing project: its tracks land as new lanes
+ * (original timing kept), missing characters are added, and everything
+ * already here — clips, rendered audio, characters, selection — is left
+ * alone. Every appended id is remapped to a fresh one, so importing the
+ * same file twice can never collide.
  */
-export function importProject(raw: string): ImportResult {
+function appendImport(built: BuiltImport): ImportResult {
+	// Characters: existing ids stay exactly as they are; missing ones are added.
+	const existingCharIds = new Set(project.characters.map((c) => c.id));
+	const charIdMap = new Map<string, string>();
+	let addedChars = 0;
+	for (const c of built.characters) {
+		if (existingCharIds.has(c.id)) {
+			charIdMap.set(c.id, c.id);
+			continue;
+		}
+		const fresh = nextId('char');
+		charIdMap.set(c.id, fresh);
+		project.characters.push({ ...c, id: fresh });
+		addedChars++;
+	}
+
+	// Tracks appended as new lanes with fresh track/clip ids.
+	const newTracks: Track[] = built.tracks.map((t) => ({
+		...t,
+		id: nextId('track'),
+		clips: t.clips.map((cl) => {
+			const id = nextId('clip');
+			if (cl.type === 'dialogue') {
+				const copy: DialogueClip = {
+					...cl,
+					id,
+					characterId: charIdMap.get(cl.characterId) ?? cl.characterId
+				};
+				return copy;
+			}
+			// Sound/ambience clips carry no character refs — a fresh id is enough.
+			return { ...cl, id };
+		})
+	}));
+	for (const t of newTracks) project.tracks.push(t);
+	syncIdCounter(project);
+	saveProjectNow();
+
+	// Same-browser round-trip for the appended sounds (cached uploads resolve).
+	for (const t of newTracks) {
+		for (const c of t.clips) {
+			if (c.type !== 'sound' || !c.file) continue;
+			void resolveSoundBuffer(c).then((buffer) => {
+				if (!buffer) return;
+				c.waveform = computePeaks(buffer, 96);
+				c.duration = Math.min(c.duration, +buffer.duration.toFixed(2));
+				markReady(c.id);
+			});
+		}
+	}
+
+	const clipCount = newTracks.reduce((n, t) => n + t.clips.length, 0);
+	toast(
+		`Added ${clipCount} clip${clipCount === 1 ? '' : 's'} on ${newTracks.length} new lane${newTracks.length === 1 ? '' : 's'} (${addedChars} new character${addedChars === 1 ? '' : 's'})`
+	);
+	// Audition the addition live when playing (no-op when stopped).
+	refreshPlaybackSoon();
+	return { ok: true };
+}
+
+/**
+ * Load a project from pasted export JSON.
+ * - `replace`: swaps the current project (drops its audio, resets selection).
+ * - `add`: appends the import as new lanes after the existing ones — current
+ *   clips, rendered audio, characters and selection stay untouched. Missing
+ *   characters are added; existing ones (by id) are kept as-is.
+ * Structure-only either way: imported dialogue/ambience comes back
+ * unrendered (no audio bytes in the JSON).
+ */
+export type ImportMode = 'replace' | 'add';
+
+export function importProject(raw: string, mode: ImportMode = 'replace'): ImportResult {
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(raw);
@@ -1830,6 +1903,7 @@ export function importProject(raw: string): ImportResult {
 
 	try {
 		const built = buildImportProject(data);
+		if (mode === 'add') return appendImport(built);
 		const { characters, tracks } = built;
 
 		// Drop the replaced project's audio (memory + persisted renders).

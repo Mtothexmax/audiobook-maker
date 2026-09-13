@@ -1,10 +1,20 @@
+<script lang="ts" module>
+	/** Consumed by the next clip click after a real drag — keeps a
+	 *  multi-selection intact instead of collapsing it (the click that
+	 *  ends a drag must not single-select). Shared across instances so it
+	 *  also survives the remount of cross-lane drags. */
+	let suppressClickSelect = false;
+</script>
+
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
 	import { browser } from '$app/environment';
 	import type { Clip, AmbienceClip } from '$lib/types';
 	import {
 		ui,
+		project,
 		charById,
+		clipById,
 		effectiveDuration,
 		moveClipToTrack,
 		trackOfClip,
@@ -56,6 +66,13 @@
 	/* dragging: move / trim (bottom handles) / fade (top handles)         */
 	/* ------------------------------------------------------------------ */
 
+	/** One member of a rigid move group (dragged clip first). */
+	interface MoveMember {
+		clip: Clip;
+		origStart: number;
+		origTrackIndex: number;
+	}
+
 	let drag: {
 		mode: DragMode;
 		startX: number;
@@ -65,8 +82,12 @@
 		origFadeOut: number;
 		/** waveform snapshot at drag start — trims cut into this, never stretch */
 		origWaveform: number[];
-		/** Target lane during drag (for cross-lane moves) */
-		targetLaneId: string | null;
+		/** Rigid group for moves (whole multi-selection, dragged clip first). */
+		group: MoveMember[];
+		/** Lane offset already applied to the group (relative to drag start). */
+		laneOffsetApplied: number;
+		/** True once the pointer actually moved (distinguishes click from drag). */
+		moved: boolean;
 	} | null = null;
 
 	/**
@@ -103,7 +124,9 @@
 			origFadeIn: clip.fadeIn,
 			origFadeOut: clip.fadeOut,
 			origWaveform: [...clip.waveform],
-			targetLaneId: trackOfClip(clip.id)?.id ?? null
+			group: mode === 'move' ? buildMoveGroup() : [],
+			laneOffsetApplied: 0,
+			moved: false
 		};
 		if (browser) {
 			window.addEventListener('mousemove', onWindowMove);
@@ -111,27 +134,71 @@
 		}
 	}
 
+	/**
+	 * Snapshot for a rigid group move: when the dragged clip belongs to a
+	 * multi-selection, every selected clip travels with it (same time
+	 * delta, same lane offset). Object references stay valid even when
+	 * clips are shuffled across lanes mid-drag.
+	 */
+	function buildMoveGroup(): MoveMember[] {
+		const multi = isClipSelected(clip.id) && ui.selectedClipIds.length > 1;
+		const ids = multi
+			? [...new Set([clip.id, ...ui.selectedClipIds, ...(ui.selectedClipId ? [ui.selectedClipId] : [])])]
+			: [clip.id];
+		const out: MoveMember[] = [];
+		for (const id of ids) {
+			const c = id === clip.id ? clip : clipById(id);
+			const trackId = c ? trackOfClip(c.id)?.id : undefined;
+			const trackIndex = trackId ? project.tracks.findIndex((t) => t.id === trackId) : -1;
+			if (!c || trackIndex < 0) continue;
+			out.push({ clip: c, origStart: c.start, origTrackIndex: trackIndex });
+		}
+		return out;
+	}
+
 	function onWindowMove(e: MouseEvent) {
 		if (!drag) return;
 		const dt = (e.clientX - drag.startX) / zoom;
 
 		if (drag.mode === 'move') {
-			// Track which lane we're over and move immediately for cross-lane dragging
+			const self = drag.group[0] ?? { clip, origStart: drag.origStart, origTrackIndex: -1 };
+			// Lane offset under the cursor → shift the whole group rigidly
+			// (e.g. everything one lane up), clamped so no member leaves the stack.
 			if (browser) {
 				const laneEl = document
 					.elementFromPoint(e.clientX, e.clientY)
 					?.closest('[data-lane-id]') as HTMLElement | null;
 				const laneId = laneEl?.dataset.laneId;
-				if (laneId && laneId !== drag.targetLaneId) {
-					drag.targetLaneId = laneId;
-					// Immediately move to the new lane
-					const currentTrackId = trackOfClip(clip.id)?.id;
-					if (laneId !== currentTrackId) {
-						moveClipToTrack(clip.id, laneId);
+				if (laneId && self.origTrackIndex >= 0) {
+					const curIdx = project.tracks.findIndex((t) => t.id === laneId);
+					if (curIdx >= 0) {
+						const minOrig = Math.min(...drag.group.map((m) => m.origTrackIndex));
+						const maxOrig = Math.max(...drag.group.map((m) => m.origTrackIndex));
+						const want = Math.max(
+							-minOrig,
+							Math.min(project.tracks.length - 1 - maxOrig, curIdx - self.origTrackIndex)
+						);
+						if (want !== drag.laneOffsetApplied) {
+							drag.laneOffsetApplied = want;
+							drag.moved = true;
+							for (const m of drag.group) {
+								const target = project.tracks[m.origTrackIndex + want];
+								if (target && trackOfClip(m.clip.id)?.id !== target.id) {
+									moveClipToTrack(m.clip.id, target.id);
+								}
+							}
+						}
 					}
 				}
 			}
-			clip.start = Math.max(0, snap(drag.origStart + dt));
+			// Time shift: the dragged clip drives (snapped), the rest follow rigidly.
+			const newSelfStart = Math.max(0, snap(self.origStart + dt));
+			const appliedDelta = newSelfStart - self.origStart;
+			if (!drag.group.length) clip.start = newSelfStart;
+			for (const m of drag.group) {
+				m.clip.start = Math.max(0, snap(m.origStart + appliedDelta));
+			}
+			if (Math.abs(e.clientX - drag.startX) > 4) drag.moved = true;
 		} else if (drag.mode === 'trim-left') {
 			let newStart = drag.origStart + dt;
 			newStart = Math.max(0, Math.min(newStart, drag.origStart + drag.origDur - MIN_DURATION));
@@ -162,7 +229,16 @@
 		refreshPlaybackSoon();
 	}
 
-	function onWindowUp() {
+	function onWindowUp(e: MouseEvent) {
+		// The click that ends a real move-drag on the same clip must not
+		// collapse a multi-selection — suppress only then (a release anywhere
+		// else targets no clip, so no stale flag may linger).
+		if (drag && drag.mode === 'move' && drag.moved && browser) {
+			const upEl = document
+				.elementFromPoint(e.clientX, e.clientY)
+				?.closest('[data-clip-id]') as HTMLElement | null;
+			if (upEl?.dataset.clipId === clip.id) suppressClickSelect = true;
+		}
 		// Clip was already moved during drag if lane changed
 		drag = null;
 		if (browser) {
@@ -190,6 +266,12 @@
 		// Ctrl/Cmd+click toggles multi-selection for batch tools (e.g. Insert pause).
 		if (e && (e.ctrlKey || e.metaKey)) {
 			toggleClipSelected(clip.id);
+			return;
+		}
+		// Pressing (mousedown) an already-selected member of a multi-selection
+		// keeps the group so it can be dragged together — the collapse to a
+		// single selection happens on click (i.e. press + release without drag).
+		if (e && e.type === 'mousedown' && isClipSelected(clip.id) && ui.selectedClipIds.length > 1) {
 			return;
 		}
 		selectClipExclusive(clip.id);
@@ -272,7 +354,11 @@
 	});
 
 	onDestroy(() => {
-		if (drag) {
+		// Mid-drag destroy = cross-lane remount: the gesture continues through
+		// the surviving window listeners (onWindowUp removes them on release),
+		// so they must NOT be detached here. This instance's document listeners
+		// are always dropped (the remounted instance registers its own).
+		if (!drag && browser) {
 			window.removeEventListener('mousemove', onWindowMove);
 			window.removeEventListener('mouseup', onWindowUp);
 		}
@@ -303,6 +389,10 @@
 		onmousedown={(e) => onHandleDown(e, 'move')}
 		onclick={(e) => {
 			e.stopPropagation();
+			if (suppressClickSelect) {
+				suppressClickSelect = false;
+				return;
+			}
 			select(e);
 		}}
 		ondblclick={(e) => {
