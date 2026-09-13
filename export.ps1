@@ -52,7 +52,12 @@ export default defineConfig({
 
 Set-Content 'vite.config.ts' $exportConfig
 # Prerender the route so adapter-static has an index.html to serve.
-Set-Content 'src/routes/+layout.ts' "export const prerender = true;`n"
+# Back up the real +layout.ts first (it carries ssr=false, which the static
+# export needs as well) and restore it afterwards — like vite.config.ts.
+$layoutPath = 'src/routes/+layout.ts'
+$layoutBackup = $null
+if (Test-Path $layoutPath) { $layoutBackup = Get-Content $layoutPath -Raw }
+Set-Content $layoutPath "export const prerender = true;`nexport const ssr = false;`n"
 
 try {
     # 3. Build
@@ -83,7 +88,11 @@ try {
 } finally {
     # Restore original vite.config.ts
     Set-Content 'vite.config.ts' $origConfig
-    Remove-Item 'src/routes/+layout.ts' -Force -ErrorAction SilentlyContinue
+    if ($null -ne $layoutBackup) {
+        Set-Content 'src/routes/+layout.ts' $layoutBackup
+    } else {
+        Remove-Item 'src/routes/+layout.ts' -Force -ErrorAction SilentlyContinue
+    }
     Remove-Item 'build' -Recurse -Force -ErrorAction SilentlyContinue
     Write-Host "Cleaned up" -ForegroundColor DarkGray
 }
