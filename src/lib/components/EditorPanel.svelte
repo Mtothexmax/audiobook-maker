@@ -8,6 +8,7 @@
 		trackOfClip,
 		regenerateClip,
 		renderAmbienceClip,
+		exportClipMp3,
 		invalidateRender,
 		clipHasAudio,
 		clipEffects,
@@ -211,6 +212,39 @@
 		else void regenerateClip(clip.id);
 	}
 
+	let exportingClip = $state(false);
+
+	/** Render this clip when needed, bounce it to MP3 and download the file. */
+	async function onExportClip() {
+		const c = clip;
+		if (!c || exportingClip || c.rendering) return;
+		exportingClip = true;
+		try {
+			const result = await exportClipMp3(c.id);
+			if (!result) return;
+			const base =
+				c.type === 'dialogue' ? (character?.name ?? 'dialogue') : c.type === 'ambience' ? 'Ambience_Mix' : c.name;
+			const safe =
+				(base || 'clip')
+					.replace(/\s+/g, '_')
+					.replace(/[^\w\-]+/g, '')
+					.slice(0, 60) || 'clip';
+			const url = URL.createObjectURL(result.blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = `${safe}.mp3`;
+			document.body.appendChild(a);
+			a.click();
+			a.remove();
+			setTimeout(() => URL.revokeObjectURL(url), 5000);
+			toast(`Clip exported as MP3 (${result.duration.toFixed(1)}s)`);
+		} catch {
+			toast('Clip export failed');
+		} finally {
+			exportingClip = false;
+		}
+	}
+
 	/* Sound MP3 upload (bytes → audio cache, JSON keeps the reference) */
 
 	let soundFileInput = $state<HTMLInputElement | undefined>(undefined);
@@ -407,6 +441,17 @@
 											: 'Render audio'}
 							</button>
 						{/if}
+						<button
+							class="flex shrink-0 items-center gap-1.5 rounded-lg border border-white/10 bg-[#202635] px-3 py-1.5 text-xs font-semibold text-gray-200 transition hover:bg-[#262b36] disabled:opacity-50"
+							onclick={onExportClip}
+							disabled={exportingClip || clip.rendering}
+							title="Render this clip if needed and download it as an MP3 file"
+						>
+							<span class="material-symbols-rounded text-sm {exportingClip ? 'animate-spin' : ''}">
+								{exportingClip ? 'progress_activity' : 'download'}
+							</span>
+							{exportingClip ? 'Exporting...' : 'Export MP3'}
+						</button>
 					{/if}
 
 					<button

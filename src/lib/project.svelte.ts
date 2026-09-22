@@ -1659,6 +1659,75 @@ export async function exportTimelineMp3(): Promise<{ blob: Blob; duration: numbe
 	return { blob: await encodeMp3(mixed), duration: total };
 }
 
+/**
+ * Render a single clip (rendering it first when it has no audio yet) and
+ * bounce it — with its fades and loudness gain — to an MP3 blob for
+ * download. Returns null when there is nothing renderable yet.
+ */
+export async function exportClipMp3(clipId: string): Promise<{ blob: Blob; duration: number } | null> {
+	const clip = clipById(clipId);
+	if (!clip) {
+		toast('Clip not found');
+		return null;
+	}
+	let buffer = getBuffer(clip.id);
+	let duration: number;
+	let gain: number | undefined;
+
+	if (clip.type === 'dialogue') {
+		if (!buffer) {
+			if (!clip.text.trim()) {
+				toast('Nothing to render — write a line first');
+				return null;
+			}
+			await regenerateClip(clip.id);
+			buffer = getBuffer(clip.id);
+		}
+		if (!buffer) {
+			toast(clip.renderError ?? 'Render failed — no audio');
+			return null;
+		}
+		duration = Math.min(effectiveDuration(clip), buffer.duration);
+		gain = clipLoudnessGain(clip);
+	} else if (clip.type === 'ambience') {
+		if (!buffer) {
+			await renderAmbienceClip(clip.id);
+			buffer = getBuffer(clip.id);
+		}
+		if (!buffer) {
+			toast('Render the ambience waveform first');
+			return null;
+		}
+		duration = Math.min(clip.duration, buffer.duration);
+	} else {
+		const resolved = await resolveSoundBuffer(clip);
+		if (!resolved) {
+			toast('No audio yet — load an MP3 in the editor first');
+			return null;
+		}
+		buffer = resolved;
+		duration = Math.min(clip.duration, buffer.duration);
+	}
+
+	if (!buffer || duration <= 0.01) {
+		toast('Nothing to export — no audio');
+		return null;
+	}
+	const scheduled: ScheduledClip = {
+		id: clip.id,
+		start: 0,
+		duration,
+		fadeIn: clip.fadeIn,
+		fadeOut: clip.fadeOut,
+		buffer,
+		gain
+	};
+	const { renderOfflineMixdown } = await import('./audio');
+	const { encodeMp3 } = await import('./mp3');
+	const mixed = await renderOfflineMixdown([scheduled], duration);
+	return { blob: await encodeMp3(mixed), duration };
+}
+
 /* ------------------------------------------------------------------ */
 /* Export / Import                                                     */
 /*                                                                     */
