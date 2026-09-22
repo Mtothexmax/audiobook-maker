@@ -4,32 +4,32 @@
  */
 
 export const EMOTIONS = [
-	'happy',
-	'sad',
 	'angry',
-	'calm',
-	'whisper',
+	'sad',
 	'excited',
-	'fearful',
-	'surprised',
-	'sarcastic',
-	'tender',
-	'dramatic'
+	'embarrassed',
+	'whisper',
+	'soft',
+	'breathy',
+	'chuckling',
+	'moaning',
+	'clear_throat',
+	'sobbing'
 ];
 
 /** Distinct Material Symbol per emotion (no more one-mask-fits-all). */
 export const EMOTION_ICONS: Record<string, string> = {
-	happy: 'sentiment_satisfied',
-	sad: 'sentiment_dissatisfied',
 	angry: 'sentiment_very_dissatisfied',
-	calm: 'sentiment_neutral',
-	whisper: 'mic',
+	sad: 'sentiment_dissatisfied',
 	excited: 'celebration',
-	fearful: 'sentiment_worried',
-	surprised: 'bolt',
-	sarcastic: 'sentiment_very_satisfied',
-	tender: 'favorite',
-	dramatic: 'theater_comedy'
+	embarrassed: 'sentiment_worried',
+	whisper: 'mic',
+	soft: 'cloud',
+	breathy: 'air',
+	chuckling: 'sentiment_very_satisfied',
+	moaning: 'sentiment_frustrated',
+	clear_throat: 'ent',
+	sobbing: 'sentiment_sad'
 };
 
 /** Icon for an emotion name (e.g. from `[emotion:whisper]`); masks as fallback. */

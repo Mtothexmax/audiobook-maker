@@ -20,7 +20,7 @@
 		VOICE_PRESETS
 	} from '$lib/project.svelte';
 	import type { EffectParam } from '$lib/types';
-	import { EMOTIONS, emotionIcon, renderTagged } from '$lib/tags';
+	import { EMOTIONS, emotionIcon } from '$lib/tags';
 	import {
 		getBuffer,
 		previewBuffer,
@@ -152,24 +152,13 @@
 		clip.text = next;
 	}
 
-	/* Unified script editor: a highlight backdrop (looks like the preview)
-	   behind a transparent real textarea — select-all/copy therefore keeps
-	   the raw [bracket] syntax natively. */
-	let backdropInner = $state<HTMLElement | undefined>(undefined);
-
-	/** Keep the highlight backdrop aligned with the transparent textarea. */
-	function syncScriptScroll() {
-		if (ta && backdropInner) {
-			backdropInner.style.transform = `translateY(${-ta.scrollTop}px)`;
-		}
-	}
-
+	/* Plain script editor: raw [bracket] tags stay as text — no highlight
+	   backdrop, so cursor, selection and scrolling behave natively. */
 	// The textarea element is reused across clips — reset scroll on switch.
 	const editingId = $derived(ui.editingClipId);
 	$effect(() => {
 		void editingId;
 		if (ta) ta.scrollTop = 0;
-		if (backdropInner) backdropInner.style.transform = '';
 	});
 
 	onDestroy(() => {
@@ -579,34 +568,16 @@
 					<div class="mb-2 text-[10px] uppercase tracking-widest text-gray-500">
 						Script + Fish Audio controls
 					</div>
-					<!-- unified script editor: looks like the highlighted preview, but is a
-					     real textarea underneath — select-all/copy keeps [brackets] -->
-					<div class="relative">
-						<div
-							aria-hidden="true"
-							class="pointer-events-none absolute inset-0 overflow-hidden rounded-xl border border-white/10 bg-[#0e131b] p-3 font-mono text-sm leading-6 text-gray-200 select-none"
-						>
-							<div
-								bind:this={backdropInner}
-								class="whitespace-pre-wrap break-words will-change-transform"
-							>
-								{@html renderTagged(clip.text)}
-							</div>
-						</div>
-						<textarea
-							bind:this={ta}
-							value={clip.text}
-							oninput={(e) => {
-								onTextInput(e);
-								syncScriptScroll();
-							}}
-							onscroll={syncScriptScroll}
-							rows={6}
-							spellcheck={false}
-							class="relative block h-36 w-full resize-none overflow-y-auto rounded-xl border border-transparent bg-transparent p-3 font-mono text-sm leading-6 text-transparent caret-violet-300 outline-none selection:bg-violet-500/40 placeholder:text-gray-600 focus:border-violet-500/60"
-							placeholder="Write the line... use [emotion:x], [pause:x], [emphasis], [speed:x]"
-						></textarea>
-					</div>
+					<!-- plain script editor: raw [bracket] tags stay as text -->
+					<textarea
+						bind:this={ta}
+						value={clip.text}
+						oninput={onTextInput}
+						rows={6}
+						spellcheck={false}
+						class="scrollbar block h-36 w-full resize-none overflow-y-auto rounded-xl border border-white/10 bg-[#0e131b] p-3 font-mono text-sm leading-6 text-gray-200 caret-violet-300 outline-none selection:bg-violet-500/40 placeholder:text-gray-600 focus:border-violet-500/60"
+						placeholder="Write the line... use [emotion:x], [pause:x], [emphasis], [speed:x]"
+					></textarea>
 
 					{#if clip.renderError}
 						<div
