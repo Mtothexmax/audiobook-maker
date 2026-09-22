@@ -5,9 +5,11 @@
 		toggleMute,
 		removeTrack,
 		snap,
+		addDialogueClip,
 		addSoundClip,
 		addCategoryClip,
 		clearClipSelection,
+		charById,
 		type SoundPreset,
 		type SoundCategory
 	} from '$lib/project.svelte';
@@ -32,8 +34,19 @@
 	function onDrop(e: DragEvent) {
 		e.preventDefault();
 		dragOver = false;
+		// Character drop first: creates a dialogue clip for that voice
+		let raw = e.dataTransfer?.getData('application/x-character-id');
+		if (raw) {
+			const characterId = raw.trim();
+			if (characterId && charById(characterId)) {
+				const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+				const start = Math.max(0, (e.clientX - rect.left) / zoom);
+				addDialogueClip(track.id, characterId, snap(start));
+				return;
+			}
+		}
 		// Try sound preset first
-		let raw = e.dataTransfer?.getData('application/x-sound-preset');
+		raw = e.dataTransfer?.getData('application/x-sound-preset');
 		if (raw) {
 			try {
 				const preset = JSON.parse(raw) as SoundPreset;

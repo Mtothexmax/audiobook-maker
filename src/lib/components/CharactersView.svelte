@@ -24,6 +24,16 @@
 					Assign Fish Audio voice profiles — select language presets or enter custom IDs.
 				</p>
 			</div>
+			<div class="flex items-center gap-2">
+			<a
+				href="https://fish.audio/app/discovery/"
+				target="_blank"
+				rel="noopener noreferrer"
+				class="flex items-center gap-1.5 rounded-lg border border-white/10 bg-[#171c27] px-4 py-2 text-sm font-medium text-gray-200 transition hover:bg-[#202635]"
+			>
+				<span class="material-symbols-rounded text-base">explore</span>
+				Discover Voice
+			</a>
 			<button
 				class="flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-violet-500"
 				onclick={() => addCharacter()}
@@ -31,6 +41,7 @@
 				<span class="material-symbols-rounded text-base">person_add</span>
 				Add Character
 			</button>
+		</div>
 		</div>
 
 		{#if project.characters.length === 0}

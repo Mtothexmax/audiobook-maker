@@ -824,6 +824,26 @@ export function addLineClip(trackId: string) {
 	toast('Dialogue clip added — write the line');
 }
 
+/** Drop a character onto a lane: new dialogue clip for that voice at `start` (or lane end). */
+export function addDialogueClip(trackId: string, characterId: string, start?: number) {
+	const track = project.tracks.find((t) => t.id === trackId);
+	if (!track) return undefined;
+	const character = charById(characterId) ?? project.characters[0];
+	const c: DialogueClip = makeDialogue(
+		nextId('clip'),
+		character?.id ?? '',
+		'',
+		snap(start ?? trackEnd(track) + 0.3)
+	);
+	track.clips.push(c);
+	ui.selectedClipId = c.id;
+	ui.selectedClipIds = [c.id];
+	ui.editingClipId = c.id;
+	ui.selectedCharacterId = c.characterId || null;
+	toast(`Dialogue clip added — ${character?.name ?? 'Unassigned'}, write the line`);
+	return c;
+}
+
 /** Add a sound clip to a lane — at `start` (drop) or at the lane end (button). */
 export function addSoundClip(trackId: string, preset: SoundPreset, start?: number) {
 	const track = project.tracks.find((t) => t.id === trackId);
@@ -1005,29 +1025,30 @@ export function clipLabel(clip: Clip): string {
  * Pass no ids (or <2 ids) to preview over ALL clips. Never mutates state.
  * `minimum` only pushes clips forward (generous gaps stay); `exact` sets
  * every gap to exactly `pauseSec` (clips may also move earlier).
+ * `ripple`: every forward shift is carried onto all later clips on other
+ * lanes (classic ripple-edit) — later clips move along by the same amount.
  */
 export function previewPauseGap(
 	pauseSec: number,
 	clipIds?: string[],
-	mode: PauseMode = 'minimum'
+	mode: PauseMode = 'minimum',
+	ripple = false
 ): PausePreview {
 	const pause = Math.max(0, pauseSec);
 	const scope: Set<string> | null =
 		clipIds && clipIds.length >= 2 ? new Set(clipIds) : null;
-	const rows: PausePreviewRow[] = [];
-	const involved = new Set<string>();
-	const trackIds = new Set<string>();
 
+	// 1) Per-lane pass (unchanged behavior): consecutive clips of the same
+	// lane keep at least/exactly `pause` seconds of gap.
+	const perLane = new Map<string, number>();
 	for (const track of project.tracks) {
 		const sorted = track.clips
 			.filter((c) => !scope || scope.has(c.id))
 			.toSorted((a, b) => a.start - b.start);
 		if (!sorted.length) continue;
-		trackIds.add(track.id);
 		let cursor = -Infinity;
 		let first = true;
 		for (const clip of sorted) {
-			involved.add(clip.id);
 			let next: number;
 			if (first) {
 				next = clip.start;
@@ -1038,6 +1059,55 @@ export function previewPauseGap(
 				next = Math.max(clip.start, cursor + pause);
 			}
 			next = snap(Math.max(0, next));
+			perLane.set(clip.id, next);
+			cursor = next + effectiveDuration(clip);
+		}
+	}
+
+	const rows: PausePreviewRow[] = [];
+	const involved = new Set<string>();
+	const trackIds = new Set<string>();
+
+	if (!ripple) {
+		for (const track of project.tracks) {
+			const sorted = track.clips
+				.filter((c) => !scope || scope.has(c.id))
+				.toSorted((a, b) => a.start - b.start);
+			if (!sorted.length) continue;
+			trackIds.add(track.id);
+			for (const clip of sorted) {
+				involved.add(clip.id);
+				const next = perLane.get(clip.id) ?? clip.start;
+				rows.push({
+					clipId: clip.id,
+					trackId: track.id,
+					trackName: track.name || 'Unnamed lane',
+					clipLabel: clipLabel(clip),
+					oldStart: +clip.start.toFixed(2),
+					newStart: next,
+					shift: round2(next - clip.start)
+				});
+			}
+		}
+	} else {
+		// 2) Ripple pass: walk ALL clips in time order, carrying every
+		// forward shift onto all later clips (any lane). Backward pulls
+		// from `exact` mode never propagate — later clips only ever move
+		// forward along, never back.
+		const all: { clip: Clip; track: Track }[] = [];
+		for (const track of project.tracks) {
+			for (const clip of track.clips) all.push({ clip, track });
+		}
+		all.sort((a, b) => a.clip.start - b.clip.start);
+		let push = 0;
+		const inScope = (id: string) => !scope || scope.has(id);
+		for (const { clip, track } of all) {
+			const base = perLane.has(clip.id) ? (perLane.get(clip.id) as number) : clip.start;
+			const next = snap(Math.max(base, clip.start + push));
+			push = Math.max(push, round2(next - clip.start));
+			if (!inScope(clip.id) && Math.abs(next - clip.start) <= 0.001) continue;
+			involved.add(clip.id);
+			trackIds.add(track.id);
 			rows.push({
 				clipId: clip.id,
 				trackId: track.id,
@@ -1047,7 +1117,6 @@ export function previewPauseGap(
 				newStart: next,
 				shift: round2(next - clip.start)
 			});
-			cursor = next + effectiveDuration(clip);
 		}
 	}
 
@@ -1066,10 +1135,16 @@ export function previewPauseGap(
 /**
  * Apply the pause gap per lane. `minimum` only shifts clips forward,
  * `exact` sets every gap to exactly `pauseSec` (first clip stays put).
- * Returns moved clip count.
+ * With `ripple`, every forward shift is carried onto all later clips on
+ * other lanes. Returns moved clip count.
  */
-export function applyPauseGap(pauseSec: number, clipIds?: string[], mode: PauseMode = 'minimum'): number {
-	const preview = previewPauseGap(pauseSec, clipIds, mode);
+export function applyPauseGap(
+	pauseSec: number,
+	clipIds?: string[],
+	mode: PauseMode = 'minimum',
+	ripple = false
+): number {
+	const preview = previewPauseGap(pauseSec, clipIds, mode, ripple);
 	clearPausePreview();
 	if (!preview.rows.length) {
 		toast('Nothing to space — no clips in scope');

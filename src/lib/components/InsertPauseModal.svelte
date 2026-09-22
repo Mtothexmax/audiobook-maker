@@ -15,6 +15,8 @@
 	let raw = $state('0.6');
 	/** Unchecked = gaps of *at least* this; checked = gaps of *exactly* this. */
 	let exact = $state(false);
+	/** Checked = forward shifts ripple onto all later clips on other lanes. */
+	let ripple = $state(false);
 	let inputEl = $state<HTMLInputElement | undefined>(undefined);
 
 	const PRESETS = [0.3, 0.6, 1.0];
@@ -35,7 +37,7 @@
 
 	const parsed = $derived(parsePause(raw));
 	const mode: PauseMode = $derived(exact ? 'exact' : 'minimum');
-	const preview = $derived(parsed != null ? previewPauseGap(parsed, scopeIds, mode) : null);
+	const preview = $derived(parsed != null ? previewPauseGap(parsed, scopeIds, mode, ripple) : null);
 
 	/* Live preview in the TIMELINE (not in this dialog): mirror the computed
 	   target positions into the preview overlay — the project itself stays
@@ -45,7 +47,7 @@
 			clearPausePreview();
 			return;
 		}
-		const p = previewPauseGap(parsed, scopeIds, mode);
+		const p = previewPauseGap(parsed, scopeIds, mode, ripple);
 		const entries: Record<string, number> = {};
 		for (const r of p.rows) {
 			if (Math.abs(r.shift) > 0.001) entries[r.clipId] = r.newStart;
@@ -61,7 +63,7 @@
 
 	function apply() {
 		if (parsed == null) return;
-		applyPauseGap(parsed, scopeIds, mode);
+		applyPauseGap(parsed, scopeIds, mode, ripple);
 		onclose();
 	}
 
@@ -156,6 +158,9 @@
 					{exact
 						? 'Clips werden bei größeren Lücken auch nach vorne gezogen.'
 						: 'Clips werden nur nach hinten geschoben, nie zurückgezogen.'}
+					{#if ripple}
+						Alle späteren Clips auf anderen Bahnen rücken dabei um die Pause mit (Ripple).
+					{/if}
 				</div>
 				<label
 					class="mt-2 flex cursor-pointer items-center gap-2 text-xs text-gray-300"
@@ -163,6 +168,13 @@
 				>
 					<input type="checkbox" bind:checked={exact} class="h-3.5 w-3.5 shrink-0 accent-cyan-500" />
 					Exakte Pausen
+				</label>
+				<label
+					class="mt-1.5 flex cursor-pointer items-center gap-2 text-xs text-gray-300"
+					title="Aktiviert: Jede Verschiebung nach hinten wird auf alle späteren Clips anderer Bahnen übertragen (Ripple-Edit). Deaktiviert: Bahnen bleiben unabhängig."
+				>
+					<input type="checkbox" bind:checked={ripple} class="h-3.5 w-3.5 shrink-0 accent-cyan-500" />
+					Andere Bahnen mitverschieben (Ripple)
 				</label>
 				<div class="mt-2 rounded-lg border border-cyan-500/20 bg-cyan-500/5 px-3 py-2 text-[11px] leading-snug">
 					{#if parsed == null}

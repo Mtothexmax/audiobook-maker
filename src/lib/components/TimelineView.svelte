@@ -320,6 +320,16 @@
 		if (ui.tab !== 'timeline') return;
 		const tag = (e.target as HTMLElement)?.tagName ?? '';
 		if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) return;
+		// Ctrl/Cmd+A selects all clips
+		if ((e.ctrlKey || e.metaKey) && e.code === 'KeyA') {
+			e.preventDefault();
+			const ids: string[] = [];
+			for (const t of project.tracks) {
+				for (const c of t.clips) ids.push(c.id);
+			}
+			setSelectedClipIds(ids);
+			return;
+		}
 		// Space to play from the time marker / pause at the time marker
 		// (but not on key-repeat).
 		if (e.code === 'Space' && !e.repeat) {
@@ -343,6 +353,13 @@
 		if (!e.dataTransfer) return;
 		e.dataTransfer.setData('application/x-sound-category', JSON.stringify(category));
 		if (e.dataTransfer) e.dataTransfer.effectAllowed = 'copy';
+	}
+
+	/* drag a character onto any lane to create a dialogue clip for that voice */
+	function onCharacterDragStart(e: DragEvent, characterId: string) {
+		if (!e.dataTransfer) return;
+		e.dataTransfer.setData('application/x-character-id', characterId);
+		e.dataTransfer.effectAllowed = 'copy';
 	}
 
 	const GUTTER = 32;
@@ -425,8 +442,9 @@
 	<div class="flex min-h-0 flex-1">
 		<!-- sidebar: cast + sound library -->
 		<aside class="flex w-64 shrink-0 flex-col border-r border-white/10 bg-[#111620]">
-			<div class="p-3">
+			<div class="p-3 pb-1">
 				<div class="text-[10px] uppercase tracking-widest text-gray-500">Characters</div>
+				<div class="mt-0.5 text-[10px] text-gray-600">Drag a voice onto a lane for a new line</div>
 			</div>
 
 			<div class="scrollbar max-h-[38%] overflow-y-auto p-2">
@@ -437,6 +455,9 @@
 							? 'border-violet-500/60 bg-violet-500/10'
 							: 'border-transparent hover:border-white/10 hover:bg-white/5'}"
 						onclick={() => (ui.selectedCharacterId = c.id)}
+						draggable="true"
+						ondragstart={(e) => onCharacterDragStart(e, c.id)}
+						title="Click to select · drag onto a lane to create a dialogue clip"
 					>
 						{#if c.face}
 							<Avatar face={c.face} size={32} />
