@@ -14,6 +14,14 @@ import { env } from '$env/dynamic/private';
 const TTS_URL = 'https://api.fish.audio/v1/tts';
 const DEFAULT_MODEL = 's2.1-pro-free';
 
+/**
+ * The app layout sets `prerender = true` (for the static GitHub Pages export).
+ * That is inherited by every route, and a prerendered endpoint only answers
+ * GET — POST /api/tts would fail with "405 Method Not Allowed".
+ * Opting this endpoint out keeps it a live server route.
+ */
+export const prerender = false;
+
 export const POST: RequestHandler = async ({ request, fetch }) => {
 	let body: {
 		text?: string;
